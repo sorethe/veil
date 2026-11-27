@@ -1,5 +1,11 @@
 # Veil architecture
 
+This page describes how the pieces fit together. For the public command/event
+surface see [CONTRACT.md](CONTRACT.md); for build steps see
+[building.md](building.md); for the security boundary see
+[security.md](security.md); for what has actually been exercised see
+[VERIFICATION.md](VERIFICATION.md).
+
 ## Crates and modules
 
 ```
@@ -12,12 +18,14 @@ src-tauri/
   src/paths.rs          config/data/runtime/exports paths, 0700 dirs
   src/db.rs             rusqlite (bundled) profiles, selections, meta, backups
   src/core.rs           core discovery, `sing-box version`, `sing-box check`
+  src/cidr.rs           CIDR parsing/validation for TUN addresses
   src/configgen.rs      runtime config injection, 0600 atomic write
   src/engine.rs         lifecycle, process supervision, stats, adoption
   src/clash.rs          Clash API client and contract mapping
   src/sysproxy.rs       GNOME/KDE/XFCE apply + exact restore, platform detect
   src/links.rs          share-link parsers -> sing-box config
   src/diagnostics.rs    read-only environment probing
+  src/instance.rs       single-instance `flock` guard
   src/logs.rs           2000-entry ring buffer, redaction, events, export
   src/tray.rs           ksni StatusNotifierItem tray
   helper/               separate veil-helper crate (root only)
@@ -64,12 +72,29 @@ Svelte UI  --invoke/events-->  veil (user, no root)
   elevated, via the `dev.veil.helper` polkit action. The GUI refuses to start TUN
   when the helper, policy, pkexec, `/dev/net/tun` or nft are missing, with a
   specific error, and never runs the GUI as root.
+- The first-use dialog (`get_tun_setup` / `install_tun_helper`) probes those
+  prerequisites and a read-only conflict preflight. It can install the helper
+  and embedded policy with `pkexec <helper> install`; the GUI never invokes
+  `sudo`. TUN connect stays gated until the real setup is ready.
 - `veil-helper` uses direct argv, never a shell. It validates configs with
   `sing-box check` before spawning, detaches with `setsid`, verifies
   `/proc/<pid>/cmdline` before stopping, uses SIGTERM → SIGKILL after 8s, and
   only touches the pid/log files it was given.
 - The polkit policy grants `auth_admin_keep` to active sessions; there is no
   passwordless sudoers entry.
+
+## Startup and single instance
+
+`instance::acquire()` takes an exclusive, non-blocking `flock` on
+`<data_dir>/veil.lock` before SQLite or runtime state is opened. A second GUI
+exits with `another Veil instance is already running (lock: ...)`; the lock is
+held for the process lifetime and released on exit. The lock file records the
+owner pid for diagnostics. The lock behavior is unit-tested; the two-launch and
+adopted-engine flows are implemented-unverified end to end.
+
+After the guard, startup loads settings and the database, restores any leftover
+desktop proxy state, and attempts engine adoption (below) before showing the
+window as idle.
 
 ## Engine lifecycle
 
@@ -89,6 +114,9 @@ Connect steps (`engine::connect`):
 1. Serialize connect/disconnect with an async operation lock.
 2. Resolve mode (`argument` > `settings.mode`) and profile
    (`profileId` > last used > first profile). Require a non-empty outbounds list.
+   In TUN mode, run the readiness/conflict preflight first and refuse with the
+   concrete missing requirement or conflict; no route, address or firewall state
+   is modified by the preflight.
 3. Find the core (settings → env → PATH → app dir → resources →
    `/usr/lib/veil/sing-box` → vendor), read its real version.
 4. Generate the runtime config from the stored raw content, write it 0600, and
@@ -124,11 +152,13 @@ touched:
 - An `inbounds` entry tagged `veil-mixed` is added (mixed HTTP+SOCKS, 127.0.0.1).
   A pre-existing mixed inbound on the same port is replaced to avoid a bind
   conflict; unrelated inbounds are kept.
-- In TUN mode a `veil-tun` inbound is added: interface `veil0`, addresses
-  `172.19.0.1/30` + `fdfe:dcba:9876::1/126`, MTU 9000, `auto_route`,
-  `strict_route`, `dns_mode: hijack`, LAN route exclusions, and
-  `auto_redirect` only when the setting is enabled. The mixed inbound stays so
-  local proxies remain usable.
+- In TUN mode a `veil-tun` inbound is added: interface `veil0`, the configured
+  `tunAddress`/`tunAddress6` (defaults `172.19.0.1/30` and
+  `fdfe:dcba:9876::1/126`), MTU 9000, `auto_route`, `strict_route`,
+  `dns_mode: hijack`, LAN route exclusions, `stack: "gvisor"`, and
+  `auto_redirect` only when the setting is enabled. `route.auto_detect_interface`
+  is set to `true` so outbound dials bind to the physical NIC instead of
+  re-entering `veil0`. The mixed inbound stays so local proxies remain usable.
 - Every unknown field is preserved byte-for-byte at the JSON value level. Raw
   profile content in SQLite is never modified by generated runtime config.
 
@@ -175,9 +205,18 @@ The API secret is additionally registered for exact replacement.
 - Child death during startup or while connected is detected by a monitor poll
   (1s) using `try_wait` (system mode) or `kill(pid, 0)` (helper mode/adopted).
 - Missing core, invalid config, helper/auth failure, missing TUN device, nft
-  absence, and Clash API timeouts produce specific errors, never a fake
-  `connected`.
+  absence, conflicting TUN/route/address state, `pkexec` timeout (120 s), and
+  Clash API timeouts produce specific errors, never a fake `connected`.
 - Clash API operations surface HTTP status and body on failure (`PATCH /configs`
   errors included).
 - The tray and notifications are best-effort; failures do not change engine
   state.
+
+## Related documentation
+
+- [building.md](building.md) — prerequisites, dev/release builds, core discovery
+- [features.md](features.md) — implemented vs verified vs absent
+- [troubleshooting.md](troubleshooting.md) — real failure modes and fixes
+- [security.md](security.md) — privilege separation, permissions, secret handling
+- [CONTRACT.md](CONTRACT.md) — commands, events and data shapes
+- [VERIFICATION.md](VERIFICATION.md) — evidence for the status claims

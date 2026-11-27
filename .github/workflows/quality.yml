@@ -2,9 +2,10 @@ name: Quality
 
 on:
   push:
-    branches: [master]
+    branches: [master, dev]
   pull_request:
-    branches: [master]
+    branches: [master, dev]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -35,18 +36,19 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Check formatting
-        run: pnpm exec prettier --check .
+        run: pnpm format:check
 
       - name: Lint
-        run: pnpm exec eslint .
+        run: pnpm lint
 
       - name: Check Svelte and TypeScript
-        run: pnpm exec svelte-check --tsconfig ./tsconfig.json
+        run: pnpm check
 
       - name: Build frontend
         run: pnpm build
@@ -84,6 +86,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable

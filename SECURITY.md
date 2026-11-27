@@ -25,6 +25,27 @@ faithful.
 There is no dedicated security email address. Please use the advisory form so
 the report stays private and can be discussed with a fix attached.
 
+## Security model at a glance
+
+- The GUI and backend run as the user and never as root. Only
+  `/usr/bin/veil-helper` is elevated, through the `dev.veil.helper` polkit
+  action (`allow_active = auth_admin_keep`; `allow_any`/`allow_inactive` are
+  `no`). There is no passwordless sudoers rule.
+- System-mode listeners are loopback-only: the mixed inbound on
+  `127.0.0.1:<mixedPort>` and the Clash API on `127.0.0.1:<apiPort>`, protected
+  by a fresh 32-character secret.
+- User directories are `0700`; settings, runtime metadata, generated config,
+  proxy-restore state and logs are `0600`.
+- Raw profiles are never rewritten. Runtime generation injects only
+  `experimental.clash_api`, log level, `veil-mixed`, and (in TUN mode)
+  `veil-tun` plus `route.auto_detect_interface`.
+- Logs redact URL userinfo, credential-like fields, UUIDs, subscription query
+  strings and registered secrets. This is pattern-based and does not make the
+  database, exports or profile JSON safe to share.
+
+The full model, helper invariants and known hardening gaps are in
+[docs/security.md](docs/security.md).
+
 ## What to report
 
 Veil has an unusually sensitive surface for a desktop app:
@@ -49,7 +70,9 @@ Veil intentionally stores profile material, subscription URLs, proxy
 credentials, settings, runtime state and logs on the local machine:
 
 - `~/.config/veil/settings.json` (mode `0600`)
-- `~/.local/share/veil/veil.db` (profiles and selections)
+- `~/.local/share/veil/veil.db` (profiles and selections; mode `0600`, inside a
+  `0700` directory)
+- `~/.local/share/veil/veil.lock` (single-instance lock owner pid; `0600`)
 - `~/.local/share/veil/runtime/` (generated config, API secret, proxy restore
   state; `0600`)
 - `~/.local/share/veil/logs/veil.log` (redacted, but still local activity data)
@@ -75,9 +98,12 @@ before public disclosure.
 
 ## Verifying the security posture yourself
 
-- `docs/ARCHITECTURE.md` describes the privilege separation and helper
-  invariants.
-- `docs/VERIFICATION.md` records what was and was not exercised, including the
-  explicitly unverified TUN path.
+- [docs/security.md](docs/security.md) is the detailed model, including helper
+  invariants, permissions and known hardening gaps.
+- `docs/ARCHITECTURE.md` describes the privilege separation and lifecycle.
+- `docs/VERIFICATION.md` records what was and was not exercised; TUN has one
+  host-specific end-to-end PASS, not a general platform guarantee.
 - The helper's source is small and self-contained in `src-tauri/helper/`.
 - The polkit policy is `src-tauri/resources/dev.veil.helper.policy`.
+- The Tauri capability set is `src-tauri/capabilities/default.json`; it grants
+  core window/event permissions only, with no shell or filesystem plugin.

@@ -1,0 +1,110 @@
+name: Bug report
+description: Report a reproducible defect in Veil.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Search existing issues first.
+
+        **Do not paste real subscription URLs, proxy credentials, profile dumps, or unredacted logs.** Veil redacts common credential fields and the Clash API secret, but review anything you attach. Report security vulnerabilities privately as described in [SECURITY.md](https://github.com/sorethe/veil/blob/master/SECURITY.md), not in a public issue.
+
+        TUN mode needs the installed `veil-helper` and polkit authorization. If you cannot test TUN, say so instead of guessing.
+  - type: input
+    id: version
+    attributes:
+      label: Veil version
+      description: The version shown in the app or the release/package you installed.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: Installation method
+      options:
+        - Arch package (PKGBUILD)
+        - User-local install (make install-local)
+        - Built from source
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: distro
+    attributes:
+      label: Distribution and desktop session
+      description: Distribution, version, desktop/compositor, and whether the session is Wayland or X11.
+      placeholder: "Arch Linux, Hyprland 0.57 on Wayland"
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      description: Which proxy mode was active when the problem occurred?
+      options:
+        - System proxy
+        - TUN
+        - System proxy and TUN
+        - Neither / unknown
+    validations:
+      required: true
+  - type: input
+    id: core
+    attributes:
+      label: sing-box core and source
+      description: Core version and where it came from (bundled /usr/lib/veil/sing-box, system PATH, configured path, or unknown).
+      placeholder: "1.14.5, bundled /usr/lib/veil/sing-box"
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics summary
+      description: Copy the summary from the Diagnostics view. Redact credentials, subscription URLs, and personal data.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Exact steps, in order, starting from a known state.
+      placeholder: |
+        1. Open ...
+        2. Select ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs (redacted)
+      description: Paste only the relevant lines. Remove credentials, subscription URLs, and personal data. Logs are optional.
+      render: text
+    validations:
+      required: false
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmations
+      options:
+        - label: I searched existing issues and did not find a duplicate.
+          required: true
+        - label: I removed credentials, subscription URLs, and personal data from this report.
+          required: true
+        - label: I understand TUN mode requires the installed helper and polkit authorization.
+          required: false

@@ -1,0 +1,206 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    name: Linux x86_64 release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate version and tag
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          pkg_version="$(jq -r .version package.json)"
+          tauri_version="$(jq -r .version src-tauri/tauri.conf.json)"
+          cargo_version="$(awk -F'"' '/^\[package\]/{p=1;next} /^\[/{p=0} p && /^version = /{print $2; exit}' src-tauri/Cargo.toml)"
+          helper_version="$(awk -F'"' '/^\[package\]/{p=1;next} /^\[/{p=0} p && /^version = /{print $2; exit}' src-tauri/helper/Cargo.toml)"
+          echo "tag=$tag package=$pkg_version tauri=$tauri_version cargo=$cargo_version helper=$helper_version"
+          if [ "$tag" != "v$pkg_version" ]; then
+            echo "::error::Tag $tag does not match package.json version $pkg_version"
+            exit 1
+          fi
+          for pair in \
+            "src-tauri/tauri.conf.json:$tauri_version" \
+            "src-tauri/Cargo.toml:$cargo_version" \
+            "src-tauri/helper/Cargo.toml:$helper_version"; do
+            file="${pair%%:*}"
+            version="${pair#*:}"
+            if [ "$version" != "$pkg_version" ]; then
+              echo "::error::$file version $version does not match $pkg_version"
+              exit 1
+            fi
+          done
+          echo "VERSION=$pkg_version" >> "$GITHUB_ENV"
+
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            pkg-config \
+            libssl-dev \
+            libdbus-1-dev \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12.22.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri -> target
+            src-tauri/helper -> target
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check formatting
+        run: pnpm format:check
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Check Svelte and TypeScript
+        run: pnpm check
+
+      - name: Build frontend
+        run: pnpm build
+
+      - name: Check Rust formatting
+        working-directory: src-tauri
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy
+        working-directory: src-tauri
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+
+      - name: Run Rust tests
+        working-directory: src-tauri
+        run: cargo test --locked --release
+
+      - name: Check helper formatting
+        run: cargo fmt --manifest-path src-tauri/helper/Cargo.toml -- --check
+
+      - name: Run helper clippy
+        run: cargo clippy --locked --manifest-path src-tauri/helper/Cargo.toml --all-targets -- -D warnings
+
+      - name: Run helper tests
+        run: cargo test --locked --release --manifest-path src-tauri/helper/Cargo.toml
+
+      # Bundles are intentionally not produced: docs/PACKAGING.md records that
+      # AppImage/deb/rpm packaging is not built or verified. This workflow uses
+      # the raw release-binary path and uploads the binaries plus the polkit,
+      # desktop, and icon resources instead. The cargo targets below are the
+      # same as `make build`, with `--locked` so the committed lockfiles remain
+      # authoritative.
+      - name: Build release binaries
+        run: |
+          set -euo pipefail
+          (cd src-tauri && cargo build --locked --release)
+          cargo build --locked --release --manifest-path src-tauri/helper/Cargo.toml
+
+      - name: Package release assets
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          cp src-tauri/target/release/veil "release/veil-${VERSION}-linux-x86_64"
+          cp src-tauri/helper/target/release/veil-helper "release/veil-helper-${VERSION}-linux-x86_64"
+          cp src-tauri/resources/dev.veil.helper.policy release/dev.veil.helper.policy
+          cp src-tauri/resources/veil.desktop release/veil.desktop
+          cp src-tauri/icons/icon.png release/veil.png
+          cp LICENSE release/LICENSE
+          tar -czf "release/veil-${VERSION}-linux-x86_64.tar.gz" \
+            -C release \
+            "veil-${VERSION}-linux-x86_64" \
+            "veil-helper-${VERSION}-linux-x86_64" \
+            dev.veil.helper.policy veil.desktop veil.png LICENSE
+          cd release
+          sha256sum \
+            "veil-${VERSION}-linux-x86_64" \
+            "veil-helper-${VERSION}-linux-x86_64" \
+            "veil-${VERSION}-linux-x86_64.tar.gz" \
+            dev.veil.helper.policy veil.desktop veil.png LICENSE > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: veil-${{ env.VERSION }}-linux-x86_64
+          path: release/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Veil ${{ env.VERSION }}
+          body: |
+            Linux x86_64 release for Veil ${{ env.VERSION }}.
+
+            These are raw binaries and configuration files. No deb, AppImage, or
+            rpm package is produced by this workflow, and no code signing is
+            configured. The helper and polkit policy are included as separate
+            assets; TUN mode still requires installing the helper and
+            authorizing it through polkit. The GUI never runs as root.
+
+            TUN is verified on the maintainer's Arch/Hyprland host (2026-11-27)
+            with real pkexec approval, gvisor, auto_detect_interface, and
+            DNS/TCP/UDP. Users still need /dev/net/tun, nftables, an installed
+            helper and the dev.veil.helper polkit action. Other hosts are
+            untested; auto_redirect runtime behavior is not end-to-end verified.
+            This is not a guarantee for every host. See the repository's
+            `docs/RELEASING.md` and `docs/PACKAGING.md` for limitations and
+            manual fallback instructions.
+          files: |
+            release/veil-${{ env.VERSION }}-linux-x86_64
+            release/veil-helper-${{ env.VERSION }}-linux-x86_64
+            release/veil-${{ env.VERSION }}-linux-x86_64.tar.gz
+            release/dev.veil.helper.policy
+            release/veil.desktop
+            release/veil.png
+            release/LICENSE
+            release/SHA256SUMS
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

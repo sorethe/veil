@@ -2,8 +2,11 @@
 
 This guide covers day-to-day work on Veil: environment setup, the module map,
 commands, debugging, test harnesses, data locations and formatting. For
-user-facing build instructions see the [README](../README.md); for packaging see
-[PACKAGING.md](PACKAGING.md).
+user-facing build instructions see [building.md](building.md); for packaging see
+[PACKAGING.md](PACKAGING.md); for failure modes see
+[troubleshooting.md](troubleshooting.md). Architecture, feature status and the
+security model are in [ARCHITECTURE.md](ARCHITECTURE.md),
+[features.md](features.md) and [security.md](security.md).
 
 ## Environment
 
@@ -234,7 +237,11 @@ veil-helper check --core /path/to/sing-box
 ```
 
 Do not claim TUN success unless the tunnel actually starts and routes traffic.
-The current verification record marks it unverified.
+The verification record documents one real end-to-end PASS on 2026-11-27
+(`gvisor` stack, `auto_detect_interface`, `pkexec`-approved helper). That result
+is host-specific: TUN still needs `/dev/net/tun`, nftables, an installed helper
+and policy, and no conflicting tunnel. See
+[VERIFICATION.md](VERIFICATION.md#tun-end-to-end--pass-2026-11-27).
 
 ## Debugging
 
@@ -282,6 +289,31 @@ XDG_CONFIG_HOME=/tmp/veil-dev-config \
 The app creates `veil/` under each. Use `VEIL_SING_BOX` or the Settings core
 path to select a core for that instance.
 
+### Single-instance lock
+
+Startup takes an exclusive non-blocking `flock` on
+`<data_dir>/veil.lock` before opening SQLite or runtime state. A second launch
+exits with `another Veil instance is already running (lock: ...)`. The lock is
+released when the process exits, so a leftover file is harmless; its contents
+are the owner pid. The lock itself is unit-tested
+(`instance::tests::second_acquire_fails`); the two-launch and adopted-engine
+flows are implemented-unverified end to end.
+
+### Stale or adopted engine
+
+`runtime/runtime.json` records the engine Veil believes it owns. On startup it
+verifies the pid, `/proc/<pid>/cmdline`, the exact config path and the Clash API
+secret before adopting it. Inspect before starting anything:
+
+```bash
+RT=~/.local/share/veil/runtime/runtime.json
+jq '{pid,mode,profileId,mixedPort,apiPort}' "$RT"
+ps -p "$(jq -r .pid "$RT")" -o pid,ppid,args
+```
+
+Never start a second TUN while one is live, and never kill processes by hand.
+Stop through the app or the helper so routes and proxy restore are cleaned up.
+
 ### Desktop proxy state
 
 Before modifying GNOME/KDE/XFCE settings, the backend writes the exact previous
@@ -303,6 +335,7 @@ unavailable rather than "working".
 | --- | --- | --- |
 | `~/.config/veil/settings.json` | UI and engine settings | `0600` |
 | `~/.local/share/veil/veil.db` | Profiles, selections, metadata | file |
+| `~/.local/share/veil/veil.lock` | Single-instance lock owner pid | `0600` |
 | `~/.local/share/veil/runtime/runtime.json` | Live engine identity and API secret | `0600` |
 | `~/.local/share/veil/runtime/config.json` | Generated runtime config | `0600` |
 | `~/.local/share/veil/runtime/sysproxy.json` | Desktop proxy restore state | `0600` |
@@ -331,6 +364,9 @@ them in a change without updating the app and test docs together.
 ## CI
 
 `.github/workflows/quality.yml` runs frontend checks and the Rust checks/tests on
-pushes and pull requests to `master`. `.github/workflows/build.yml` builds the
-release app and helper and uploads them as artifacts. CI does not run TUN,
-desktop-proxy, or AppImage tests; do not claim those from a green build.
+pushes and pull requests to `master` and `dev`. `.github/workflows/build.yml`
+builds the release app and helper and uploads them as artifacts. CI does not run
+TUN, desktop-proxy, or AppImage tests; do not claim those from a green build.
+
+For runtime failures, start with [troubleshooting.md](troubleshooting.md) and
+the in-app Diagnostics/Logs views.

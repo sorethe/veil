@@ -39,6 +39,12 @@ Outputs:
 
 The release app embeds the built frontend (`custom-protocol` is a default cargo feature).
 
+The tag release workflow (`.github/workflows/release.yml`) runs the same checks
+and builds these two binaries with locked dependencies. It does not invoke
+`pnpm tauri build` or produce deb/AppImage/rpm bundles; it uploads the raw
+binaries plus the polkit policy, desktop entry, icon, and `LICENSE`. See
+[RELEASING.md](RELEASING.md) for the automated pipeline and manual fallback.
+
 ## User-local launcher (no sudo)
 
 Build the release first, then create a per-user launcher. This installs only into the
@@ -175,6 +181,9 @@ other core is found or configured.
 
 Status: **not built and not verified.**
 
+The tag release workflow does not build an AppImage. It uploads the raw release
+binaries and configuration files described in [RELEASING.md](RELEASING.md).
+
 Tauri's AppImage bundler is available (`@tauri-apps/cli` 2.12.6 is installed through pnpm). The
 expected command is:
 
@@ -197,9 +206,11 @@ the installed helper.
 
 ## Limitations
 
-- **TUN mode and root are unverified in this packaging pass.** The helper install path, polkit
-  action and `pkexec` call were checked by reading code only. No `pkexec` authentication, no
-  `/dev/net/tun` access and no nftables rules were exercised here.
+- **TUN end-to-end is verified on the maintainer's Arch/Hyprland host (2026-11-27).** The run
+  used real `pkexec` approval, `veil0`, the `gvisor` stack, `auto_detect_interface`, and
+  DNS/TCP/UDP. This packaging pass did not build or install the Arch package, and other hosts
+  remain untested. `auto_redirect` runtime behavior is not end-to-end verified. Users still
+  need `/dev/net/tun`, nftables, an installed helper and the `dev.veil.helper` polkit action.
 - `src-tauri/resources/sing-box` is **not tracked** and is ignored by `.gitignore`; a local copy
   may remain for development. The PKGBUILD and `make-source-tarball.sh` use the official pinned
   upstream core instead. The current repository history does not contain the local core binary;

@@ -1,0 +1,61 @@
+name: Feature request
+description: Propose a focused improvement to Veil.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Veil targets Linux x86_64 and a Tauri 2 + Rust backend with a Svelte 5 frontend. Proposals that require Windows, macOS, or a second proxy engine are out of scope for this repository. Search existing issues before opening a new one.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What limitation or friction are you trying to solve? Describe the use case, not only the desired UI.
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What should Veil do? Include commands, events, or data-shape changes if relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - UI / frontend
+        - Engine / sing-box integration
+        - Profiles and imports
+        - System proxy
+        - TUN / privileged helper
+        - Diagnostics and logs
+        - Packaging and documentation
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Veil version
+      description: Optional. The version you are running, if relevant.
+      placeholder: "0.1.0"
+    validations:
+      required: false
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmations
+      options:
+        - label: I searched existing issues and did not find a duplicate.
+          required: true
+        - label: I understand that TUN behavior is currently unverified end-to-end and that CI does not exercise TUN, desktop proxy, or bundling.
+          required: false

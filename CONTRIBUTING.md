@@ -9,6 +9,10 @@ over optimistic claims: a change that cannot be tested should say so.
 - Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and
   [docs/CONTRACT.md](docs/CONTRACT.md). The contract is the coordination
   artifact between the Rust and TypeScript sides.
+- Build steps, feature status and failure modes are in
+  [docs/building.md](docs/building.md), [docs/features.md](docs/features.md) and
+  [docs/troubleshooting.md](docs/troubleshooting.md). The security model is in
+  [docs/security.md](docs/security.md).
 - The frontend talks to the backend only through the documented commands and
   events. Do not add duplicate state or engine logic in the UI, and do not make
   the backend report a state it has not observed.
@@ -164,8 +168,29 @@ resulting profile.
 
 TUN requires root/polkit and `/dev/net/tun`; there is no passwordless sudoers
 rule. Do not weaken the polkit policy to make tests pass. If you cannot test TUN,
-say so in the pull request instead of claiming success. The verification record
-documents TUN as unverified.
+say so in the pull request instead of claiming success. One end-to-end PASS is
+recorded (2026-11-27, `gvisor` stack, `auto_detect_interface`,
+`pkexec`-approved helper), but it is host-specific: do not generalize it to
+other kernels, distributions or conflicting tunnels. See
+[docs/VERIFICATION.md](docs/VERIFICATION.md#tun-end-to-end--pass-2026-11-27).
+
+## Documentation
+
+- Keep the README as the entry point and link new guides from
+  [README.md](README.md#documentation).
+- Use the repository's status vocabulary consistently: **verified /
+  integration-tested**, **tested**, **implemented**, **implemented-unverified**,
+  **best-effort**, **unsupported**, **absent**. Do not promote a planned or
+  untested behavior to a finished feature.
+- A change that affects engine behavior, permissions, packaging or platform
+  support must update [docs/VERIFICATION.md](docs/VERIFICATION.md) or state
+  explicitly what remains unverified. Feature-status changes belong in
+  [docs/features.md](docs/features.md).
+- Markdown under `docs/`, the root README, `CONTRIBUTING.md` and `SECURITY.md`
+  is currently excluded from `prettier --check` by `.prettierignore`. Check
+  links, tables and rendering manually; do not rely on the frontend format gate
+  for prose.
+- Do not invent screenshots, badges, download links, or release claims.
 
 ## Code conventions
 
@@ -222,14 +247,15 @@ A good pull request:
 - solves one problem and does not mix unrelated refactors;
 - includes tests for behavior changes (or explains why a test is not possible);
 - updates [docs/CONTRACT.md](docs/CONTRACT.md) when commands, events, or data
-  shapes change, and [CHANGELOG.md](CHANGELOG.md) under `Unreleased` for
-  user-visible changes;
+  shapes change, [docs/VERIFICATION.md](docs/VERIFICATION.md)/
+  [docs/features.md](docs/features.md) when behavior or status claims change,
+  and [CHANGELOG.md](CHANGELOG.md) under `Unreleased` for user-visible changes;
 - contains no secrets, real subscription URLs, credentials, database dumps, or
   personal logs;
 - states what was actually run and what remains unverified. CI passing is not a
   substitute for runtime evidence.
 
-CI runs the quality workflow on pushes and pull requests to `master`, and the
-build workflow produces release binaries as artifacts. TUN behavior, desktop
-proxy behavior on unlisted desktops, and AppImage packaging are not exercised
-by CI.
+CI runs the quality workflow on pushes and pull requests to `master` and `dev`,
+and the build workflow produces release binaries as artifacts. TUN behavior,
+desktop proxy behavior on unlisted desktops, and AppImage packaging are not
+exercised by CI.
