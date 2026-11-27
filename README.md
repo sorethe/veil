@@ -101,9 +101,11 @@ The first executable found in this order is used:
 6. `/usr/lib/veil/sing-box`
 7. development vendor build (`vendor/sing-box-*/sing-box`)
 
-A copy of the vendored 1.14.5 binary is bundled at
-`src-tauri/resources/sing-box` (also installed to `/usr/lib/veil/sing-box` by the
-PKGBUILD). Change the core path in Settings to use a system sing-box instead.
+A local vendored 1.14.5 copy may exist at `src-tauri/resources/sing-box` for
+development, but it is git-ignored and not part of the repository. The Arch
+PKGBUILD fetches the official v1.14.5 upstream release and installs it to
+`/usr/lib/veil/sing-box`. Change the core path in Settings to use a system
+sing-box instead.
 
 ## TUN helper install
 

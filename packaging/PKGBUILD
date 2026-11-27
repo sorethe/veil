@@ -1,34 +1,69 @@
 # Maintainer: Veil
-# Build from a release tarball that unpacks to veil-$pkgver/.
+# Local release tarball: create it with packaging/make-source-tarball.sh (it
+# writes veil-$pkgver.tar.gz next to this file). The Veil tarball is built from
+# the working tree, so its checksum changes per build and is SKIPped; pin it
+# (sha256sum veil-$pkgver.tar.gz) once a tagged release is published.
+# The sing-box core is fetched from the official upstream release and pinned.
+# See docs/PACKAGING.md.
 pkgname=veil
 pkgver=0.1.0
 pkgrel=1
+_singbox_ver=1.14.5
 pkgdesc="Linux desktop proxy client powered by sing-box"
 arch=('x86_64')
-url="https://veil.dev"
+url="https://example.invalid/veil" # placeholder; no verified upstream domain
 license=('MIT')
-depends=('webkit2gtk-4.1' 'gtk3' 'libsoup3' 'nftables' 'polkit' 'zbar')
-makedepends=('rust' 'cargo' 'nodejs' 'pnpm')
-optdepends=('sing-box: system-wide core instead of the bundled binary')
-source=("$pkgname-$pkgver.tar.gz")
-sha256sums=('SKIP')
+depends=(
+  'gtk3'
+  'webkit2gtk-4.1'
+  'libsoup3'
+  'librsvg'
+  'libayatana-appindicator'
+  'iproute2'
+  'nftables'
+  'polkit'
+  'zbar'
+)
+makedepends=('rust' 'nodejs' 'pnpm')
+optdepends=('sing-box: use a system-wide core instead of the bundled one')
+source=(
+  "$pkgname-$pkgver.tar.gz"
+  "sing-box-$_singbox_ver.tar.gz::https://github.com/SagerNet/sing-box/releases/download/v$_singbox_ver/sing-box-$_singbox_ver-linux-amd64.tar.gz"
+)
+sha256sums=(
+  'SKIP'
+  'ca57e405be6b7dc79a0efa91823a0cc4d81138cbe4a9aacbfd749c65e6fca3b2'
+)
+
+_coredir="sing-box-$_singbox_ver-linux-amd64"
+
+prepare() {
+  cd "$srcdir/$pkgname-$pkgver"
+  pnpm install --frozen-lockfile
+  ( cd src-tauri && cargo fetch --locked )
+  cargo fetch --locked --manifest-path src-tauri/helper/Cargo.toml
+}
 
 build() {
   cd "$srcdir/$pkgname-$pkgver"
-  pnpm install --frozen-lockfile
   pnpm build
-  export PATH="$HOME/.cargo/bin:$PATH"
+  # custom-protocol is a default feature, so this embeds the built frontend.
   ( cd src-tauri && cargo build --release --locked )
   cargo build --release --locked --manifest-path src-tauri/helper/Cargo.toml
 }
 
 package() {
   cd "$srcdir/$pkgname-$pkgver"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -Dm755 src-tauri/target/release/veil "$pkgdir/usr/bin/veil"
   install -Dm755 src-tauri/helper/target/release/veil-helper "$pkgdir/usr/bin/veil-helper"
   install -Dm644 src-tauri/resources/dev.veil.helper.policy \
     "$pkgdir/usr/share/polkit-1/actions/dev.veil.helper.policy"
   install -Dm644 src-tauri/resources/veil.desktop "$pkgdir/usr/share/applications/veil.desktop"
   install -Dm644 src-tauri/icons/icon.png "$pkgdir/usr/share/icons/hicolor/512x512/apps/veil.png"
-  install -Dm755 src-tauri/resources/sing-box "$pkgdir/usr/lib/veil/sing-box" 2>/dev/null || true
+
+  # Bundled core: official upstream binary (checksum pinned above).
+  install -Dm755 "$srcdir/$_coredir/sing-box" "$pkgdir/usr/lib/veil/sing-box"
+  install -Dm644 "$srcdir/$_coredir/libcronet.so" "$pkgdir/usr/lib/veil/libcronet.so"
+  install -Dm644 "$srcdir/$_coredir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/sing-box-LICENSE"
 }

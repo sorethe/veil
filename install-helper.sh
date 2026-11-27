@@ -7,7 +7,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
 echo "==> Building veil-helper (release)"
-cargo build --release --manifest-path src-tauri/helper/Cargo.toml
+cargo build --release --locked --manifest-path src-tauri/helper/Cargo.toml
 
 echo "==> Installing /usr/bin/veil-helper"
 sudo install -Dm755 src-tauri/helper/target/release/veil-helper /usr/bin/veil-helper
@@ -32,4 +32,7 @@ Notes:
 - The polkit action allows active-session users to authenticate as admin (kept
   briefly). No passwordless sudoers rule is used.
 - TUN mode needs /dev/net/tun and nftables. The helper never runs a shell.
+- This script writes files owned by no package. Do not run it on a system where
+  the veil pacman package is installed (it provides the same paths).
+- Verify the polkit action with: pkaction --verbose --action-id dev.veil.helper
 EOF

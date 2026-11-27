@@ -2,7 +2,7 @@ PNPM ?= pnpm
 CARGO ?= cargo
 VENDOR_CORE := $(CURDIR)/vendor/sing-box-1.14.5-linux-amd64/sing-box
 
-.PHONY: help install build frontend backend helper test smoke install-helper clean
+.PHONY: help install build frontend backend helper test smoke install-helper source-tarball clean
 
 help:
 	@echo "Veil targets:"
@@ -44,3 +44,6 @@ clean:
 	rm -rf dist
 	cd src-tauri && $(CARGO) clean
 	$(CARGO) clean --manifest-path src-tauri/helper/Cargo.toml
+
+source-tarball:
+	./packaging/make-source-tarball.sh
