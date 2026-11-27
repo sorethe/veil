@@ -90,6 +90,10 @@ export interface Settings {
   apiPort: number;
   corePath: string | null;
   autoRedirect: boolean;
+  /** IPv4 CIDR of the Veil TUN interface, e.g. 172.19.0.1/30. */
+  tunAddress: string;
+  /** IPv6 CIDR of the Veil TUN interface, e.g. fdfe:dcba:9876::1/126. */
+  tunAddress6: string;
   autostart: boolean;
   connectOnLaunch: boolean;
   notifications: boolean;
@@ -249,8 +253,15 @@ export interface TunSetup {
   tunDevice: boolean;
   nft: boolean;
   canInstall: boolean;
+  /** Addresses the read-only preflight checked, copied from settings. */
+  tunAddress: string;
+  tunAddress6: string;
   /** Other active TUN interfaces whose routes and DNS would collide with Veil. */
   conflictingInterfaces: string[];
+  /** Existing routes that overlap the proposed TUN CIDRs, e.g. "172.19.0.0/24 dev throne-tun". */
+  conflictingRoutes: string[];
+  /** Proposed host addresses already assigned to another interface. */
+  conflictingAddresses: string[];
   missing: string[];
   detail: string;
 }

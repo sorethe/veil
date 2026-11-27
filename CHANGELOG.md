@@ -21,6 +21,15 @@ been tagged or published as a binary.
   interface routes or DNS. The setup dialog names the conflicting interfaces
   and offers retry/Diagnostics instead of installation; System proxy remains
   available.
+- Configurable `tunAddress` / `tunAddress6` settings (IPv4 and IPv6 CIDRs,
+  defaults `172.19.0.1/30` and `fdfe:dcba:9876::1/126`) feed TUN config
+  generation and are validated as real CIDRs before they are saved.
+- Read-only TUN overlap preflight: `get_tun_setup` and `connect` parse
+  `ip route`/`ip -j addr` output, compare existing route prefixes and assigned
+  addresses with the proposed TUN CIDRs, and refuse TUN with the conflicting
+  routes/interfaces named. No route, address, DNS, or firewall state is
+  modified, and the setup dialog states that TUN remains blocked and Throne
+  must stay untouched.
 
 ### Changed
 

@@ -1,3 +1,4 @@
+use crate::cidr::Cidr;
 use crate::core::{CoreInfo, EngineCapabilities};
 use crate::logs::LogStore;
 use crate::sysproxy;
@@ -73,9 +74,16 @@ pub struct TunSetup {
     pub tun_device: bool,
     pub nft: bool,
     pub can_install: bool,
+    /// Configured addresses the preflight checked, copied from settings.
+    pub tun_address: String,
+    pub tun_address6: String,
     /// Other active TUN interfaces (ARPHRD_NONE, operstate not down) that
     /// would collide with Veil's interface routes and DNS.
     pub conflicting_interfaces: Vec<String>,
+    /// Read-only route conflicts, formatted as "<cidr> dev <interface>".
+    pub conflicting_routes: Vec<String>,
+    /// Proposed host addresses that already belong to another interface.
+    pub conflicting_addresses: Vec<String>,
     pub missing: Vec<String>,
     pub detail: String,
 }
@@ -186,7 +194,29 @@ struct SetupParts {
     pkexec_available: bool,
     tun_device: bool,
     nft: bool,
+    tun_address: String,
+    tun_address6: String,
     conflicting_interfaces: Vec<String>,
+    conflicting_routes: Vec<String>,
+    conflicting_addresses: Vec<String>,
+}
+
+fn proposed_addresses(tun_address: &str, tun_address6: &str) -> (Vec<Cidr>, Vec<String>) {
+    let mut proposed = Vec::new();
+    let mut errors = Vec::new();
+    match Cidr::parse_ipv4(tun_address) {
+        Ok(cidr) => proposed.push(cidr),
+        Err(error) => errors.push(format!(
+            "tunAddress {tun_address:?} is not a valid IPv4 CIDR: {error}"
+        )),
+    }
+    match Cidr::parse_ipv6(tun_address6) {
+        Ok(cidr) => proposed.push(cidr),
+        Err(error) => errors.push(format!(
+            "tunAddress6 {tun_address6:?} is not a valid IPv6 CIDR: {error}"
+        )),
+    }
+    (proposed, errors)
 }
 
 fn tun_setup_from_parts(parts: SetupParts) -> TunSetup {
@@ -198,8 +228,14 @@ fn tun_setup_from_parts(parts: SetupParts) -> TunSetup {
         pkexec_available,
         tun_device,
         nft,
+        tun_address,
+        tun_address6,
         conflicting_interfaces,
+        conflicting_routes,
+        conflicting_addresses,
     } = parts;
+
+    let (_, address_errors) = proposed_addresses(&tun_address, &tun_address6);
 
     let mut other_missing = Vec::new();
     if !helper_installed {
@@ -222,29 +258,69 @@ fn tun_setup_from_parts(parts: SetupParts) -> TunSetup {
         other_missing.push("nft is not installed".to_string());
     }
 
-    let conflict = !conflicting_interfaces.is_empty();
+    let interface_conflict = !conflicting_interfaces.is_empty();
+    let route_conflict = !conflicting_routes.is_empty();
+    let address_conflict = !conflicting_addresses.is_empty();
+    let address_invalid = !address_errors.is_empty();
+    let conflict = interface_conflict || route_conflict || address_conflict || address_invalid;
     let mut missing = Vec::new();
-    if conflict {
+    if interface_conflict {
         missing.push(format!(
             "Another TUN interface is active: {}; disable it before using Veil TUN",
             conflicting_interfaces.join(", ")
         ));
     }
+    for route in &conflicting_routes {
+        missing.push(format!(
+            "Route {route} overlaps proposed TUN {tun_address} or {tun_address6}; Veil will not change routes"
+        ));
+    }
+    for address in &conflicting_addresses {
+        missing.push(format!(
+            "Address {address} is already assigned to another interface; Veil will not reassign it"
+        ));
+    }
+    missing.extend(address_errors.iter().cloned());
     missing.extend(other_missing.iter().cloned());
 
     let prerequisites_ready =
         helper_installed && policy_installed && pkexec_available && tun_device && nft;
     let ready = prerequisites_ready && !conflict;
-    // Installing the helper cannot resolve a route/DNS collision with another
-    // tunnel, so do not offer installation while one is active.
+    // Installing the helper cannot resolve route, address or DNS collisions,
+    // so do not offer installation while any conflict is present.
     let can_install =
         helper_found && pkexec_available && (!helper_installed || !policy_installed) && !conflict;
     let detail = if ready {
         "TUN setup is ready.".to_string()
     } else if conflict {
-        let mut detail = format!(
-            "Another TUN interface is active ({}). Two TUN interfaces cannot share interface routes or DNS, so Veil will not start TUN until the other tunnel is disabled. Stop the other tunnel and check again, or use System proxy.",
-            conflicting_interfaces.join(", ")
+        let mut detail = if interface_conflict {
+            format!(
+                "Another TUN interface is active ({}). Two TUN interfaces cannot share interface routes or DNS, so Veil will not start TUN until the other tunnel is disabled. Stop the other tunnel and check again, or use System proxy.",
+                conflicting_interfaces.join(", ")
+            )
+        } else {
+            "TUN setup is blocked by a network conflict.".to_string()
+        };
+        if route_conflict {
+            detail.push_str(&format!(
+                " Overlapping route(s): {}.",
+                conflicting_routes.join("; ")
+            ));
+        }
+        if address_conflict {
+            detail.push_str(&format!(
+                " Already assigned address(es): {}.",
+                conflicting_addresses.join("; ")
+            ));
+        }
+        if address_invalid {
+            detail.push_str(&format!(
+                " Invalid configured TUN address: {}.",
+                address_errors.join("; ")
+            ));
+        }
+        detail.push_str(
+            " No routes were changed by this check. Veil does not modify routes, addresses, DNS, or firewall rules; Throne must remain untouched. Change the TUN addresses in Settings or use System proxy.",
         );
         if !other_missing.is_empty() {
             detail.push_str(&format!(
@@ -266,7 +342,11 @@ fn tun_setup_from_parts(parts: SetupParts) -> TunSetup {
         tun_device,
         nft,
         can_install,
+        tun_address,
+        tun_address6,
         conflicting_interfaces,
+        conflicting_routes,
+        conflicting_addresses,
         missing,
         detail,
     }
@@ -304,9 +384,168 @@ fn conflicting_tun_interfaces() -> Vec<String> {
     names
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RouteSpec {
+    pub destination: String,
+    pub dev: Option<String>,
+}
+
+impl RouteSpec {
+    pub fn from_destination(destination: &str, dev: Option<&str>) -> Option<Self> {
+        let destination = normalize_destination(destination)?;
+        Some(Self {
+            destination,
+            dev: dev.map(str::to_string),
+        })
+    }
+
+    /// Parse one line of `ip route show` / `ip -6 route show` output.
+    pub fn parse_line(line: &str) -> Option<Self> {
+        let tokens: Vec<&str> = line.split_whitespace().collect();
+        let destination = *tokens.first()?;
+        let dev = tokens
+            .iter()
+            .position(|token| *token == "dev")
+            .and_then(|index| tokens.get(index + 1))
+            .copied();
+        Self::from_destination(destination, dev)
+    }
+
+    pub fn description(&self) -> String {
+        match &self.dev {
+            Some(dev) => format!("{} dev {}", self.destination, dev),
+            None => self.destination.clone(),
+        }
+    }
+}
+
+fn normalize_destination(value: &str) -> Option<String> {
+    if value.is_empty() || value == "default" {
+        return None;
+    }
+    let cidr = if value.contains('/') {
+        Cidr::parse(value).ok()?
+    } else {
+        let addr: IpAddr = value.parse().ok()?;
+        let prefix = if addr.is_ipv4() { 32 } else { 128 };
+        Cidr { addr, prefix }
+    };
+    Some(cidr.to_string())
+}
+
+/// Compare route destinations with the proposed TUN CIDRs. Pure: callers can
+/// feed captured `ip route` output without touching the network.
+pub fn route_conflicts(routes: &[RouteSpec], proposed: &[Cidr]) -> Vec<String> {
+    let mut conflicts = Vec::new();
+    for route in routes {
+        let Ok(destination) = Cidr::parse(&route.destination) else {
+            continue;
+        };
+        if proposed
+            .iter()
+            .any(|address| address.overlaps(&destination))
+        {
+            conflicts.push(route.description());
+        }
+    }
+    conflicts.sort();
+    conflicts.dedup();
+    conflicts
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AddrSpec {
+    pub address: String,
+    pub ifname: String,
+}
+
+/// Proposed host addresses that already belong to another interface. Pure and
+/// read-only; `veil0` is excluded because it is Veil's own interface.
+pub fn address_conflicts(addresses: &[AddrSpec], proposed: &[Cidr]) -> Vec<String> {
+    let mut conflicts = Vec::new();
+    for assigned in addresses {
+        if assigned.ifname == "veil0" {
+            continue;
+        }
+        let Some(host) = assigned
+            .address
+            .split('/')
+            .next()
+            .and_then(|value| value.parse::<IpAddr>().ok())
+        else {
+            continue;
+        };
+        if proposed.iter().any(|address| address.addr == host) {
+            conflicts.push(format!("{} on {}", assigned.address, assigned.ifname));
+        }
+    }
+    conflicts.sort();
+    conflicts.dedup();
+    conflicts
+}
+
+fn route_from_json(value: &Value) -> Option<RouteSpec> {
+    let destination = value.get("dst").and_then(Value::as_str)?;
+    let dev = value.get("dev").and_then(Value::as_str);
+    RouteSpec::from_destination(destination, dev)
+}
+
+fn route_specs_for_family(v6: bool) -> Vec<RouteSpec> {
+    let mut json_args = vec!["-j"];
+    if v6 {
+        json_args.push("-6");
+    }
+    json_args.extend_from_slice(&["route", "show"]);
+    if let Some(value) = run_ip(&json_args) {
+        if let Some(routes) = value.as_array() {
+            return routes.iter().filter_map(route_from_json).collect();
+        }
+    }
+
+    let mut args = Vec::new();
+    if v6 {
+        args.push("-6");
+    }
+    args.extend_from_slice(&["route", "show"]);
+    let Ok(output) = Command::new("ip").args(&args).output() else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(RouteSpec::parse_line)
+        .collect()
+}
+
+fn overlapping_routes(proposed: &[Cidr]) -> Vec<String> {
+    let mut routes = route_specs_for_family(false);
+    routes.extend(route_specs_for_family(true));
+    route_conflicts(&routes, proposed)
+}
+
+fn assigned_addresses() -> Vec<AddrSpec> {
+    let mut addresses = Vec::new();
+    for interface in interfaces() {
+        for address in interface.addresses {
+            addresses.push(AddrSpec {
+                address,
+                ifname: interface.name.clone(),
+            });
+        }
+    }
+    addresses
+}
+
+fn overlapping_addresses(proposed: &[Cidr]) -> Vec<String> {
+    address_conflicts(&assigned_addresses(), proposed)
+}
+
 /// Probe the real system for TUN prerequisites. Never reports a requirement as
-/// satisfied unless the corresponding file/binary is actually present.
-pub fn tun_setup(resource_dir: Option<&Path>) -> TunSetup {
+/// satisfied unless the corresponding file/binary is actually present. Route
+/// and address reads are read-only; nothing on the host is changed.
+pub fn tun_setup(resource_dir: Option<&Path>, tun_address: &str, tun_address6: &str) -> TunSetup {
     let helper_path = find_helper(resource_dir);
     let helper_found = helper_path.is_some();
     let helper_installed = [
@@ -319,6 +558,15 @@ pub fn tun_setup(resource_dir: Option<&Path>) -> TunSetup {
     let pkexec_available = find_in_path("pkexec").is_some();
     let tun_device = Path::new("/dev/net/tun").exists();
     let nft = find_in_path("nft").is_some();
+    let (proposed, _) = proposed_addresses(tun_address, tun_address6);
+    let (conflicting_routes, conflicting_addresses) = if proposed.is_empty() {
+        (Vec::new(), Vec::new())
+    } else {
+        (
+            overlapping_routes(&proposed),
+            overlapping_addresses(&proposed),
+        )
+    };
     tun_setup_from_parts(SetupParts {
         helper_found,
         helper_path: helper_path.map(|path| path.to_string_lossy().into_owned()),
@@ -327,7 +575,11 @@ pub fn tun_setup(resource_dir: Option<&Path>) -> TunSetup {
         pkexec_available,
         tun_device,
         nft,
+        tun_address: tun_address.to_string(),
+        tun_address6: tun_address6.to_string(),
         conflicting_interfaces: conflicting_tun_interfaces(),
+        conflicting_routes,
+        conflicting_addresses,
     })
 }
 
@@ -636,6 +888,28 @@ mod tests {
         }
     }
 
+    fn setup_parts(
+        helper_found: bool,
+        helper_installed: bool,
+        policy_installed: bool,
+        pkexec_available: bool,
+        tun_device: bool,
+        nft: bool,
+    ) -> SetupParts {
+        SetupParts {
+            helper_found,
+            helper_path: helper_found.then(|| "/usr/bin/veil-helper".to_string()),
+            helper_installed,
+            policy_installed,
+            pkexec_available,
+            tun_device,
+            nft,
+            tun_address: crate::configgen::DEFAULT_TUN_ADDRESS.into(),
+            tun_address6: crate::configgen::DEFAULT_TUN_ADDRESS6.into(),
+            ..SetupParts::default()
+        }
+    }
+
     fn setup(
         helper_found: bool,
         helper_installed: bool,
@@ -644,18 +918,16 @@ mod tests {
         tun_device: bool,
         nft: bool,
     ) -> TunSetup {
-        setup_with_conflicts(
+        tun_setup_from_parts(setup_parts(
             helper_found,
             helper_installed,
             policy_installed,
             pkexec_available,
             tun_device,
             nft,
-            Vec::new(),
-        )
+        ))
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn setup_with_conflicts(
         helper_found: bool,
         helper_installed: bool,
@@ -665,16 +937,16 @@ mod tests {
         nft: bool,
         conflicting_interfaces: Vec<String>,
     ) -> TunSetup {
-        tun_setup_from_parts(SetupParts {
+        let mut parts = setup_parts(
             helper_found,
-            helper_path: helper_found.then(|| "/usr/bin/veil-helper".to_string()),
             helper_installed,
             policy_installed,
             pkexec_available,
             tun_device,
             nft,
-            conflicting_interfaces,
-        })
+        );
+        parts.conflicting_interfaces = conflicting_interfaces;
+        tun_setup_from_parts(parts)
     }
 
     #[test]
@@ -763,6 +1035,133 @@ mod tests {
     }
 
     #[test]
+    fn route_conflicts_are_parsed_from_ip_route_text() {
+        let lines = [
+            "172.19.0.0/24 dev throne-tun scope link",
+            "10.0.0.0/8 dev eth0 scope link",
+            "default via 192.168.1.1 dev eth0",
+            "fdfe:dcba:9876::/64 dev throne-tun metric 256 pref medium",
+            "172.19.0.128/25 dev eth0",
+        ];
+        let routes: Vec<RouteSpec> = lines
+            .iter()
+            .filter_map(|line| RouteSpec::parse_line(line))
+            .collect();
+        assert_eq!(routes.len(), 4);
+        assert_eq!(
+            RouteSpec::from_destination("172.19.0.1", None)
+                .unwrap()
+                .destination,
+            "172.19.0.1/32"
+        );
+        let proposed = [
+            Cidr::parse("172.19.0.1/30").unwrap(),
+            Cidr::parse("fdfe:dcba:9876::1/126").unwrap(),
+        ];
+        assert_eq!(
+            route_conflicts(&routes, &proposed),
+            [
+                "172.19.0.0/24 dev throne-tun",
+                "fdfe:dcba:9876::/64 dev throne-tun"
+            ]
+        );
+    }
+
+    #[test]
+    fn address_conflicts_ignore_veil_and_match_proposed_hosts() {
+        let assigned = [
+            AddrSpec {
+                address: "172.19.0.1/30".into(),
+                ifname: "throne0".into(),
+            },
+            AddrSpec {
+                address: "172.19.0.1/30".into(),
+                ifname: "veil0".into(),
+            },
+            AddrSpec {
+                address: "fdfe:dcba:9876::1/126".into(),
+                ifname: "throne0".into(),
+            },
+            AddrSpec {
+                address: "10.9.0.1/30".into(),
+                ifname: "throne0".into(),
+            },
+        ];
+        let proposed = [
+            Cidr::parse("172.19.0.1/30").unwrap(),
+            Cidr::parse("fdfe:dcba:9876::1/126").unwrap(),
+        ];
+        assert_eq!(
+            address_conflicts(&assigned, &proposed),
+            [
+                "172.19.0.1/30 on throne0",
+                "fdfe:dcba:9876::1/126 on throne0"
+            ]
+        );
+    }
+
+    #[test]
+    fn tun_setup_rejects_overlapping_routes() {
+        let mut parts = setup_parts(true, true, true, true, true, true);
+        parts.conflicting_routes = vec!["172.19.0.0/24 dev throne-tun".into()];
+        let setup = tun_setup_from_parts(parts);
+        assert!(!setup.ready);
+        assert!(!setup.can_install);
+        assert_eq!(setup.conflicting_routes, ["172.19.0.0/24 dev throne-tun"]);
+        assert!(setup.missing.iter().any(
+            |label| label.contains("Route 172.19.0.0/24 dev throne-tun overlaps proposed TUN")
+        ));
+        assert!(setup.detail.contains("No routes were changed"));
+        assert!(setup.detail.contains("Throne must remain untouched"));
+    }
+
+    #[test]
+    fn tun_setup_rejects_assigned_proposed_addresses() {
+        let mut parts = setup_parts(true, true, true, true, true, true);
+        parts.conflicting_addresses = vec!["172.19.0.1/30 on Meta".into()];
+        let setup = tun_setup_from_parts(parts);
+        assert!(!setup.ready);
+        assert!(!setup.can_install);
+        assert_eq!(setup.conflicting_addresses, ["172.19.0.1/30 on Meta"]);
+        assert!(setup
+            .missing
+            .iter()
+            .any(|label| label.contains("Address 172.19.0.1/30 on Meta is already assigned")));
+        assert!(setup.detail.contains("Throne must remain untouched"));
+    }
+
+    #[test]
+    fn tun_setup_rejects_invalid_configured_addresses() {
+        let mut parts = setup_parts(true, true, true, true, true, true);
+        parts.tun_address = "172.19.0.1".into();
+        parts.tun_address6 = "172.19.0.1/30".into();
+        let setup = tun_setup_from_parts(parts);
+        assert!(!setup.ready);
+        assert!(!setup.can_install);
+        assert_eq!(setup.tun_address, "172.19.0.1");
+        assert!(setup
+            .missing
+            .iter()
+            .any(|label| label.contains("tunAddress \"172.19.0.1\" is not a valid IPv4 CIDR")));
+        assert!(setup
+            .missing
+            .iter()
+            .any(|label| label.contains("tunAddress6 \"172.19.0.1/30\" is not a valid IPv6 CIDR")));
+        assert!(setup.detail.contains("Invalid configured TUN address"));
+    }
+
+    #[test]
+    fn tun_setup_reports_configured_addresses() {
+        let mut parts = setup_parts(true, true, true, true, true, true);
+        parts.tun_address = "10.9.0.1/30".into();
+        parts.tun_address6 = "fdfe:2::1/126".into();
+        let setup = tun_setup_from_parts(parts);
+        assert!(setup.ready);
+        assert_eq!(setup.tun_address, "10.9.0.1/30");
+        assert_eq!(setup.tun_address6, "fdfe:2::1/126");
+    }
+
+    #[test]
     fn tun_setup_serializes_contract_fields() {
         let json = serde_json::to_value(setup(true, false, false, true, true, true)).unwrap();
         for key in [
@@ -775,12 +1174,24 @@ mod tests {
             "tunDevice",
             "nft",
             "canInstall",
+            "tunAddress",
+            "tunAddress6",
             "conflictingInterfaces",
+            "conflictingRoutes",
+            "conflictingAddresses",
             "missing",
             "detail",
         ] {
             assert!(json.get(key).is_some(), "missing {key}");
         }
+        assert_eq!(
+            json["tunAddress"],
+            serde_json::json!(crate::configgen::DEFAULT_TUN_ADDRESS)
+        );
+        assert_eq!(
+            json["tunAddress6"],
+            serde_json::json!(crate::configgen::DEFAULT_TUN_ADDRESS6)
+        );
     }
 
     #[test]

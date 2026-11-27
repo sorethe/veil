@@ -22,6 +22,7 @@ use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use veil_lib::clash::ClashClient;
+use veil_lib::configgen::GenOptions;
 use veil_lib::core;
 use veil_lib::db::Db;
 use veil_lib::engine::{Engine, EventSink};
@@ -203,6 +204,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mixed_port = free_port();
     let api_port = free_port();
+    let check_opts = GenOptions {
+        mode: "system".into(),
+        mixed_port,
+        api_port,
+        auto_redirect: false,
+        log_level: "info".into(),
+        ..GenOptions::default()
+    };
     let settings = Arc::new(SettingsStore::with_path(
         temp.join("config/veil/settings.json"),
     ));
@@ -269,9 +278,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or(0);
     println!("outbound_count: {outbound_count}");
 
-    let checked = core::validate_content(
-        &core, &content, "system", mixed_port, api_port, false, "info",
-    );
+    let checked = core::validate_content(&core, &content, &check_opts);
     match checked {
         Ok(tags) => println!("sing_box_check: ok ({} outbound tags)", tags.len()),
         Err(_) => {
@@ -410,10 +417,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok((refresh_status, refresh_body)) => {
             println!("refresh_http_status: {refresh_status}");
             let refresh_result = normalize_subscription_body(&refresh_body).and_then(|content| {
-                core::validate_content(
-                    &core, &content, "system", mixed_port, api_port, false, "info",
-                )
-                .map(|_| content)
+                core::validate_content(&core, &content, &check_opts).map(|_| content)
             });
             match refresh_result {
                 Ok(refreshed) => {

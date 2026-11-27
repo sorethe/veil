@@ -31,6 +31,12 @@ fn default_language() -> String {
 fn default_true() -> bool {
     true
 }
+fn default_tun_address() -> String {
+    crate::configgen::DEFAULT_TUN_ADDRESS.into()
+}
+fn default_tun_address6() -> String {
+    crate::configgen::DEFAULT_TUN_ADDRESS6.into()
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
@@ -41,6 +47,8 @@ pub struct Settings {
     pub api_port: u16,
     pub core_path: Option<String>,
     pub auto_redirect: bool,
+    pub tun_address: String,
+    pub tun_address6: String,
     pub autostart: bool,
     pub connect_on_launch: bool,
     pub notifications: bool,
@@ -61,6 +69,8 @@ impl Default for Settings {
             api_port: default_api_port(),
             core_path: None,
             auto_redirect: false,
+            tun_address: default_tun_address(),
+            tun_address6: default_tun_address6(),
             autostart: false,
             connect_on_launch: false,
             notifications: default_true(),
@@ -93,6 +103,10 @@ impl Settings {
         ) {
             return Err("logLevel must be one of trace, debug, info, warn, error".into());
         }
+        crate::cidr::Cidr::parse_ipv4(&self.tun_address)
+            .map_err(|e| format!("tunAddress must be a valid IPv4 CIDR: {e}"))?;
+        crate::cidr::Cidr::parse_ipv6(&self.tun_address6)
+            .map_err(|e| format!("tunAddress6 must be a valid IPv6 CIDR: {e}"))?;
         if self.subscription_interval_hours > 24 * 30 {
             self.subscription_interval_hours = 24 * 30;
         }
@@ -211,6 +225,70 @@ mod tests {
         let raw = fs::read_to_string(dir.join("settings.json")).unwrap();
         assert!(raw.contains("\"mixedPort\": 2100"));
         assert!(store.update(&serde_json::json!({"mixedPort": 0})).is_err());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tun_addresses_have_backwards_compatible_defaults() {
+        let settings = Settings::default();
+        assert_eq!(settings.tun_address, crate::configgen::DEFAULT_TUN_ADDRESS);
+        assert_eq!(
+            settings.tun_address6,
+            crate::configgen::DEFAULT_TUN_ADDRESS6
+        );
+
+        let dir = std::env::temp_dir().join(format!("veil-settings-tun-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        fs::write(&path, r#"{"theme":"light"}"#).unwrap();
+        let store = SettingsStore::with_path(path);
+        let loaded = store.get();
+        assert_eq!(loaded.tun_address, crate::configgen::DEFAULT_TUN_ADDRESS);
+        assert_eq!(loaded.tun_address6, crate::configgen::DEFAULT_TUN_ADDRESS6);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tun_addresses_validate_syntax_and_persist() {
+        let dir = std::env::temp_dir().join(format!(
+            "veil-settings-tun-validation-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let store = SettingsStore {
+            path: dir.join("settings.json"),
+            inner: Mutex::new(Settings::default()),
+        };
+
+        let updated = store
+            .update(&serde_json::json!({
+                "tunAddress": "10.9.0.1/30",
+                "tunAddress6": "fdfe:2::1/126"
+            }))
+            .unwrap();
+        assert_eq!(updated.tun_address, "10.9.0.1/30");
+        assert_eq!(updated.tun_address6, "fdfe:2::1/126");
+        let raw = fs::read_to_string(store.path()).unwrap();
+        assert!(raw.contains("\"tunAddress\": \"10.9.0.1/30\""));
+        assert!(raw.contains("\"tunAddress6\": \"fdfe:2::1/126\""));
+
+        for invalid in [
+            serde_json::json!({"tunAddress": "10.9.0.1"}),
+            serde_json::json!({"tunAddress": "10.9.0.1/33"}),
+            serde_json::json!({"tunAddress": "fdfe::1/126"}),
+            serde_json::json!({"tunAddress": "not-an-ip/24"}),
+            serde_json::json!({"tunAddress6": "fdfe::1"}),
+            serde_json::json!({"tunAddress6": "fdfe::1/129"}),
+            serde_json::json!({"tunAddress6": "10.9.0.1/30"}),
+            serde_json::json!({"tunAddress6": "nope/64"}),
+        ] {
+            assert!(
+                store.update(&invalid).is_err(),
+                "{invalid} must be rejected"
+            );
+        }
+        assert_eq!(store.get().tun_address, "10.9.0.1/30");
+        assert_eq!(store.get().tun_address6, "fdfe:2::1/126");
         let _ = fs::remove_dir_all(&dir);
     }
 

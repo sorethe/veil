@@ -45,7 +45,11 @@
           : "Install helper & enable TUN",
   );
   const blockedReason = $derived(setup ? installBlockReason(setup) : null);
-  const hasConflict = $derived((setup?.conflictingInterfaces.length ?? 0) > 0);
+  const hasConflict = $derived(
+    (setup?.conflictingInterfaces.length ?? 0) > 0 ||
+      (setup?.conflictingRoutes.length ?? 0) > 0 ||
+      (setup?.conflictingAddresses.length ?? 0) > 0,
+  );
 
   function rowsFor(value: TunSetup | null): SetupRow[] {
     if (!value) return [];
@@ -58,6 +62,22 @@
         label: "Other TUN interface",
         ok: false,
         detail: `${names} ${many ? "are" : "is"} active; TUN interfaces cannot share interface routes or DNS`,
+      });
+    }
+    for (const route of value.conflictingRoutes) {
+      rows.push({
+        key: `route:${route}`,
+        label: "Overlapping route",
+        ok: false,
+        detail: `${route} overlaps the proposed TUN address`,
+      });
+    }
+    for (const address of value.conflictingAddresses) {
+      rows.push({
+        key: `address:${address}`,
+        label: "Address already assigned",
+        ok: false,
+        detail: `${address} belongs to another interface`,
       });
     }
     rows.push(
@@ -102,8 +122,12 @@
   }
 
   function installBlockReason(value: TunSetup): string {
-    if (value.conflictingInterfaces.length) {
-      return "Another TUN interface is active. Veil cannot share interface routes or DNS with it; disable the other tunnel before using Veil TUN.";
+    if (
+      value.conflictingInterfaces.length ||
+      value.conflictingRoutes.length ||
+      value.conflictingAddresses.length
+    ) {
+      return "Another tunnel already owns routes, addresses, or TUN interfaces that overlap the proposed Veil TUN addresses. Veil will not modify them; TUN stays blocked until the conflict is resolved. Change the TUN addresses in Settings or disable the other tunnel.";
     }
     if (value.helperInstalled && value.policyInstalled) {
       return "The helper and policy are installed, but TUN still has unmet prerequisites. Veil does not install system packages for you.";
@@ -203,6 +227,12 @@
       root.
     </p>
 
+    {#if setup}
+      <p class="setup__proposed mono">
+        Proposed TUN: {setup.tunAddress} · {setup.tunAddress6}
+      </p>
+    {/if}
+
     {#if checking && !setup}
       <p class="setup__loading" role="status">Checking helper, polkit, and TUN prerequisites…</p>
     {/if}
@@ -238,16 +268,37 @@
         {/each}
       </ul>
 
-      {#if setup.conflictingInterfaces.length}
+      {#if hasConflict}
         <div class="banner banner--error" role="alert">
           <Icon name="error" size={15} />
           <div class="grow">
-            <p class="banner__title">Another TUN interface is active</p>
+            <p class="banner__title">TUN is blocked by an existing network conflict</p>
+            {#if setup.conflictingInterfaces.length}
+              <p class="banner__body">
+                {setup.conflictingInterfaces.join(", ")}
+                {setup.conflictingInterfaces.length === 1 ? "is" : "are"} already using TUN. Two TUN interfaces
+                cannot share interface routes or DNS.
+              </p>
+            {/if}
+            {#if setup.conflictingRoutes.length}
+              <ul class="setup__conflicts" aria-label="Overlapping routes">
+                {#each setup.conflictingRoutes as route (route)}
+                  <li>Overlapping route: <span class="mono">{route}</span></li>
+                {/each}
+              </ul>
+            {/if}
+            {#if setup.conflictingAddresses.length}
+              <ul class="setup__conflicts" aria-label="Assigned addresses">
+                {#each setup.conflictingAddresses as address (address)}
+                  <li>Address already assigned: <span class="mono">{address}</span></li>
+                {/each}
+              </ul>
+            {/if}
             <p class="banner__body">
-              {setup.conflictingInterfaces.join(", ")}
-              {setup.conflictingInterfaces.length === 1 ? "is" : "are"} already using TUN. Veil cannot
-              share interface routes or DNS with another tunnel, so TUN is unavailable while it runs.
-              Disable or stop the other tunnel and retry, or switch this session to System proxy.
+              Veil will not modify any existing route, address, DNS, or firewall rule, and TUN stays
+              blocked until these conflicts are resolved. Throne must be left untouched: stop or
+              reconfigure the other tunnel, change the TUN addresses in Settings, or use System
+              proxy.
             </p>
           </div>
         </div>
@@ -357,6 +408,22 @@
     color: var(--faint);
     letter-spacing: 0.06em;
     text-transform: uppercase;
+  }
+
+  .setup__proposed {
+    font-size: var(--fs-2xs);
+    color: var(--muted);
+    overflow-wrap: anywhere;
+  }
+
+  .setup__conflicts {
+    margin: 0;
+    padding-left: 1.1em;
+    display: grid;
+    gap: 2px;
+    font-size: var(--fs-2xs);
+    color: var(--muted);
+    overflow-wrap: anywhere;
   }
 
   .checks {

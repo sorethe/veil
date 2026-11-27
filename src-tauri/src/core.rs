@@ -319,23 +319,8 @@ pub fn check(core: &Path, config: &Path) -> Result<(), String> {
 
 /// Validate raw profile JSON through a generated runtime config, using the
 /// real `sing-box check` binary. Returns outbound tags.
-pub fn validate_content(
-    core: &Path,
-    raw: &str,
-    mode: &str,
-    mixed_port: u16,
-    api_port: u16,
-    auto_redirect: bool,
-    log_level: &str,
-) -> Result<Vec<String>, String> {
-    let opts = GenOptions {
-        mode: mode.to_string(),
-        mixed_port,
-        api_port,
-        auto_redirect,
-        log_level: log_level.to_string(),
-    };
-    let generated = configgen::generate(raw, &opts)?;
+pub fn validate_content(core: &Path, raw: &str, opts: &GenOptions) -> Result<Vec<String>, String> {
+    let generated = configgen::generate(raw, opts)?;
     let tags = configgen::outbound_tags(&generated.value);
     let path = env::temp_dir().join(format!("veil-check-{}.json", uuid::Uuid::new_v4()));
     {
@@ -437,7 +422,7 @@ mod tests {
         };
         let core = Path::new(&core);
         let valid = r#"{"outbounds":[{"type":"direct","tag":"direct"}]}"#;
-        assert!(validate_content(core, valid, "system", 2080, 9090, false, "info").is_ok());
+        assert!(validate_content(core, valid, &GenOptions::default()).is_ok());
         let subscription_style = r#"{
             "outbounds": [
                 {"type":"selector","tag":"Proxy","outbounds":["node-a","node-b"]},
@@ -446,47 +431,14 @@ mod tests {
             ],
             "route": {"final": "Proxy"}
         }"#;
-        let tags = validate_content(
-            core,
-            subscription_style,
-            "system",
-            2080,
-            9090,
-            false,
-            "info",
-        )
-        .expect("subscription-style sing-box config must pass real check");
+        let tags = validate_content(core, subscription_style, &GenOptions::default())
+            .expect("subscription-style sing-box config must pass real check");
         assert!(tags.contains(&"Proxy".to_string()));
-        assert!(validate_content(
-            core,
-            "{ this is not json",
-            "system",
-            2080,
-            9090,
-            false,
-            "info"
-        )
-        .is_err());
-        assert!(validate_content(
-            core,
-            r#"{"log":{"level":"info"}}"#,
-            "system",
-            2080,
-            9090,
-            false,
-            "info"
-        )
-        .is_err());
-        assert!(validate_content(
-            core,
-            r#"{"outbounds":[]}"#,
-            "system",
-            2080,
-            9090,
-            false,
-            "info"
-        )
-        .is_err());
+        assert!(validate_content(core, "{ this is not json", &GenOptions::default()).is_err());
+        assert!(
+            validate_content(core, r#"{"log":{"level":"info"}}"#, &GenOptions::default()).is_err()
+        );
+        assert!(validate_content(core, r#"{"outbounds":[]}"#, &GenOptions::default()).is_err());
     }
 
     #[test]

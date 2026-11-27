@@ -90,6 +90,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         api_port,
         auto_redirect: false,
         log_level: "info".into(),
+        ..GenOptions::default()
     };
     let raw_profile = r#"{
         "outbounds": [{ "type": "direct", "tag": "direct" }],

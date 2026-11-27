@@ -879,6 +879,21 @@ impl Engine {
         if !matches!(mode.as_str(), "system" | "tun") {
             return Err(format!("unknown mode '{mode}' (expected system or tun)"));
         }
+        if mode == "tun" {
+            let setup = diagnostics::tun_setup(
+                self.resource_dir.as_deref(),
+                &settings.tun_address,
+                &settings.tun_address6,
+            );
+            if !setup.ready {
+                let detail = if setup.missing.is_empty() {
+                    setup.detail
+                } else {
+                    setup.missing.join("; ")
+                };
+                return Err(format!("TUN setup is required: {detail}"));
+            }
+        }
         let profile = match profile_id_arg.or_else(|| self.db.last_profile_id()) {
             Some(id) => self
                 .db
@@ -901,13 +916,8 @@ impl Engine {
         self.reset_stats();
         let core_version = core::version(&core_path).ok();
 
-        let opts = GenOptions {
-            mode: mode.clone(),
-            mixed_port: settings.mixed_port,
-            api_port: settings.api_port,
-            auto_redirect: settings.auto_redirect,
-            log_level: settings.log_level.clone(),
-        };
+        let mut opts = GenOptions::from_settings(&settings);
+        opts.mode = mode.clone();
         let generated = configgen::generate(&profile.content, &opts)?;
         let config_path = paths::runtime_config_path();
         configgen::write_runtime_config(&config_path, &generated.json)?;

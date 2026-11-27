@@ -130,6 +130,8 @@ type Settings = {
   apiPort: number
   corePath: string | null
   autoRedirect: boolean
+  tunAddress: string       // IPv4 CIDR for the Veil TUN interface; default "172.19.0.1/30"
+  tunAddress6: string      // IPv6 CIDR for the Veil TUN interface; default "fdfe:dcba:9876::1/126"
   autostart: boolean
   connectOnLaunch: boolean
   notifications: boolean
@@ -221,7 +223,7 @@ type Diagnostics = {
 }
 
 type TunSetup = {
-  ready: boolean             // helper installed + policy + pkexec + /dev/net/tun + nft
+  ready: boolean             // helper installed + policy + pkexec + /dev/net/tun + nft, and no conflicts
   helperFound: boolean       // a veil-helper executable was located
   helperInstalled: boolean   // /usr/bin/veil-helper or /usr/local/bin/veil-helper
   helperPath: string | null  // located helper binary, null when not found
@@ -229,9 +231,13 @@ type TunSetup = {
   pkexecAvailable: boolean
   tunDevice: boolean         // /dev/net/tun exists
   nft: boolean               // nft executable on PATH
-  canInstall: boolean        // helperFound && pkexecAvailable && missing helper/policy, no conflicting TUN
+  canInstall: boolean        // helperFound && pkexecAvailable && missing helper/policy, no conflicts
+  tunAddress: string         // configured IPv4 CIDR checked by the preflight
+  tunAddress6: string        // configured IPv6 CIDR checked by the preflight
   conflictingInterfaces: string[] // other active TUN interfaces (ARPHRD_NONE, not operstate down)
-  missing: string[]          // human-readable labels for each unmet requirement
+  conflictingRoutes: string[] // existing routes overlapping the proposed CIDRs, e.g. "172.19.0.0/24 dev throne-tun"
+  conflictingAddresses: string[] // proposed host addresses already assigned elsewhere, e.g. "172.19.0.1/30 on Meta"
+  missing: string[]          // human-readable labels for each conflict or unmet requirement
   detail: string             // summary suitable for display
 }
 ```
@@ -244,8 +250,21 @@ the first entry in `missing`. Installing the helper cannot resolve it: the UI
 must tell the user to disable or stop the other tunnel (or use `system` mode)
 and offer a retry plus Diagnostics instead of an install action.
 
-`get_tun_setup` reports the live TUN prerequisite state; it never mutates
-anything. `install_tun_helper` locates the helper (resources or installed
+The preflight also reads `ip -j route show`, `ip -j -6 route show` (text
+fallback) and `ip -j addr` without changing anything. Every route destination
+that overlaps `tunAddress` or `tunAddress6` is reported in `conflictingRoutes`
+as `"<cidr> dev <interface>"`; a proposed host address already assigned to an
+interface other than `veil0` is reported in `conflictingAddresses` as
+`"<cidr> on <interface>"`. Each conflict appears in `missing` with the
+overlapping route/address named, makes `ready` and `canInstall` false, and is
+explained in `detail`. `detail` states that no routes were changed and that
+Veil will not modify other interfaces' routes, addresses, DNS, or firewall
+rules, so Throne must remain untouched. Veil never removes or changes those
+routes; resolving the conflict (disabling the other tunnel or choosing
+different TUN addresses in Settings) is the user's action.
+
+`get_tun_setup` reports the live TUN prerequisite state using the configured
+settings addresses; it never mutates anything. `install_tun_helper` locates the helper (resources or installed
 location), requires `pkexec`, and runs `pkexec <helper> install` (120s timeout).
 The helper embeds the polkit policy and atomically installs itself to
 `/usr/bin/veil-helper` as root; the GUI process never runs as root and no shell
@@ -312,14 +331,19 @@ Rules:
 - `engine://state` is the only authority on engine state (see lifecycle above).
   `connect` resolves `connected` only after a real Clash API health check.
 - `connect` with `mode: 'tun'` (or the persisted `settings.mode` when `mode` is
-  omitted) first checks `get_tun_setup`. If `ready` is false it rejects before
-  spawning anything with code `permission`, message `"TUN setup is required"`,
-  and `detail` listing the missing requirements. A non-empty
-  `conflictingInterfaces` always rejects here even when every other
-  prerequisite is met, and its label appears in `detail`. The UI should offer
-  `install_tun_helper` and then retry only when no conflict exists; for a
-  conflict it must instead explain that another TUN owns interface routes/DNS
-  and ask the user to stop it or use `system` mode. `system` mode is unaffected.
+  omitted) first runs the same read-only preflight as `get_tun_setup`, using
+  `settings.tunAddress` and `settings.tunAddress6`. If `ready` is false it
+  rejects before generating or spawning anything with code `permission`,
+  message `"TUN setup is required"`, and `detail` listing the conflicts and
+  missing requirements. A non-empty `conflictingInterfaces`,
+  `conflictingRoutes`, or `conflictingAddresses` always rejects here even when
+  every other prerequisite is met, and its labels appear in `detail`. The UI
+  should offer `install_tun_helper` and then retry only when no conflict
+  exists; for a conflict it must instead explain that another tunnel owns
+  interface routes/addresses and ask the user to stop it, change the TUN
+  addresses, or use `system` mode. The preflight never modifies routes,
+  addresses, DNS, or firewall rules, and Throne must be left untouched.
+  `system` mode is unaffected.
 - Stats are only produced by sing-box's Clash API. When idle, `get_stats`
   returns cached zeros and `duration: 0`; nothing is polled when idle.
 - `proxy.kind` values: `gnome`, `kde`, `xfce`, `tun`, `unsupported`, `error`.
@@ -341,7 +365,11 @@ Rules:
 - QR import requires `zbarimg`; it rejects with a clear error when unavailable
   or when no QR code is found.
 - `update_settings` accepts a partial object; unknown keys are ignored and
-  invalid values are rejected.
+  invalid values are rejected. `tunAddress` must be a real IPv4 CIDR
+  (`Ipv4Addr` plus `/0..32`) and `tunAddress6` a real IPv6 CIDR (`Ipv6Addr`
+  plus `/0..128`); missing prefixes, wrong families, and out-of-range prefixes
+  are rejected. Older settings files without the fields load the defaults
+  `172.19.0.1/30` and `fdfe:dcba:9876::1/126`.
 - `set_autostart` writes `~/.config/autostart/veil.desktop` and also updates the
   `autostart` setting.
 - `engineInfo.capabilities` is derived from actual detection (binary tags,

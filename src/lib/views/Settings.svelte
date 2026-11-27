@@ -16,6 +16,8 @@
   let apiPort = $state(String(initial?.apiPort ?? ""));
   let corePath = $state(initial?.corePath ?? "");
   let autoRedirect = $state(initial?.autoRedirect ?? false);
+  let tunAddress = $state(initial?.tunAddress ?? "172.19.0.1/30");
+  let tunAddress6 = $state(initial?.tunAddress6 ?? "fdfe:dcba:9876::1/126");
   let autostart = $state(initial?.autostart ?? false);
   let connectOnLaunch = $state(initial?.connectOnLaunch ?? false);
   let notifications = $state(initial?.notifications ?? true);
@@ -63,11 +65,18 @@
   const logLevels = $derived(
     Array.from(new Set(["trace", "debug", "info", "warn", "error", "fatal", "panic", logLevel])),
   );
+  const tunConflict = $derived(
+    tunSetup
+      ? tunSetup.conflictingInterfaces.length > 0 ||
+          tunSetup.conflictingRoutes.length > 0 ||
+          tunSetup.conflictingAddresses.length > 0
+      : false,
+  );
   const tunSetupLabel = $derived(
     setupChecking
       ? "checking"
       : tunSetup
-        ? tunSetup.conflictingInterfaces.length
+        ? tunConflict
           ? "conflict"
           : tunSetup.ready
             ? "ready"
@@ -122,6 +131,8 @@
     apiPort = String(settings.apiPort);
     corePath = settings.corePath ?? "";
     autoRedirect = settings.autoRedirect;
+    tunAddress = settings.tunAddress;
+    tunAddress6 = settings.tunAddress6;
     autostart = settings.autostart;
     connectOnLaunch = settings.connectOnLaunch;
     notifications = settings.notifications;
@@ -243,6 +254,70 @@
       field === "mixedPort" ? { mixedPort: value } : { apiPort: value },
       `${field === "mixedPort" ? "Mixed" : "API"} port saved`,
     );
+  }
+
+  function isIPv4(value: string): boolean {
+    const parts = value.split(".");
+    return (
+      parts.length === 4 &&
+      parts.every(
+        (part) => /^\d{1,3}$/.test(part) && Number(part) <= 255 && String(Number(part)) === part,
+      )
+    );
+  }
+
+  function isIPv6(value: string): boolean {
+    if (!value.includes(":") || value.includes("%")) return false;
+    try {
+      new URL(`http://[${value}]/`);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function validateCidr(raw: string, family: 4 | 6): string | null {
+    const value = raw.trim();
+    const slash = value.indexOf("/");
+    if (slash <= 0 || slash !== value.lastIndexOf("/")) {
+      return `Enter a CIDR such as ${family === 4 ? "172.19.0.1/30" : "fdfe:dcba:9876::1/126"}.`;
+    }
+    const address = value.slice(0, slash);
+    const prefix = value.slice(slash + 1);
+    if (!/^\d+$/.test(prefix)) {
+      return "Prefix length must be a whole number after /.";
+    }
+    const prefixLength = Number(prefix);
+    if (family === 4) {
+      if (!isIPv4(address)) return "Enter a valid IPv4 address before /prefix.";
+      if (prefixLength > 32) return "IPv4 prefix length must be between 0 and 32.";
+    } else {
+      if (!isIPv6(address)) return "Enter a valid IPv6 address before /prefix.";
+      if (prefixLength > 128) return "IPv6 prefix length must be between 0 and 128.";
+    }
+    return null;
+  }
+
+  async function commitTunAddress(field: "tunAddress" | "tunAddress6"): Promise<void> {
+    const raw = (field === "tunAddress" ? tunAddress : tunAddress6).trim();
+    const failure = validateCidr(raw, field === "tunAddress" ? 4 : 6);
+    if (failure) {
+      errors[field] = failure;
+      return;
+    }
+    if (app.settings?.[field] === raw) {
+      errors[field] = null;
+      if (field === "tunAddress") tunAddress = raw;
+      else tunAddress6 = raw;
+      return;
+    }
+    const patch: Partial<Settings> =
+      field === "tunAddress" ? { tunAddress: raw } : { tunAddress6: raw };
+    const saved = await apply(field, patch, "TUN address saved");
+    if (!saved) return;
+    if (field === "tunAddress") tunAddress = raw;
+    else tunAddress6 = raw;
+    void refreshTunSetup();
   }
 
   function commitInterval(): void {
@@ -647,6 +722,59 @@
 
       <div class="deflist__row">
         <dt class="setting">
+          <span class="setting__label">IPv4 TUN address</span>
+          <span class="setting__hint">
+            CIDR for Veil's TUN interface (default <span class="mono">172.19.0.1/30</span>). Used by
+            the next TUN session. The preflight compares it read-only with existing routes and
+            refuses TUN on overlap.
+          </span>
+        </dt>
+        <dd class="setting__control">
+          <input
+            class="input input--mono cidr"
+            type="text"
+            autocomplete="off"
+            spellcheck="false"
+            aria-label="IPv4 TUN address"
+            placeholder="172.19.0.1/30"
+            bind:value={tunAddress}
+            onchange={() => void commitTunAddress("tunAddress")}
+            onkeydown={(event) => {
+              if (event.key === "Enter") void commitTunAddress("tunAddress");
+            }}
+          />
+          {#if errors.tunAddress}<p class="field__error" role="alert">{errors.tunAddress}</p>{/if}
+        </dd>
+      </div>
+
+      <div class="deflist__row">
+        <dt class="setting">
+          <span class="setting__label">IPv6 TUN address</span>
+          <span class="setting__hint">
+            CIDR for the same interface (default <span class="mono">fdfe:dcba:9876::1/126</span>).
+            IPv4 and IPv6 must not overlap routes owned by another tunnel.
+          </span>
+        </dt>
+        <dd class="setting__control">
+          <input
+            class="input input--mono cidr"
+            type="text"
+            autocomplete="off"
+            spellcheck="false"
+            aria-label="IPv6 TUN address"
+            placeholder="fdfe:dcba:9876::1/126"
+            bind:value={tunAddress6}
+            onchange={() => void commitTunAddress("tunAddress6")}
+            onkeydown={(event) => {
+              if (event.key === "Enter") void commitTunAddress("tunAddress6");
+            }}
+          />
+          {#if errors.tunAddress6}<p class="field__error" role="alert">{errors.tunAddress6}</p>{/if}
+        </dd>
+      </div>
+
+      <div class="deflist__row">
+        <dt class="setting">
           <span class="setting__label">API port</span>
           <span class="setting__hint">
             Local Clash API used for stats, connections, and outbound switching.
@@ -885,6 +1013,10 @@
     width: 130px;
   }
 
+  .cidr {
+    width: min(100%, 300px);
+  }
+
   .toggle-line {
     display: flex;
     align-items: center;
@@ -940,6 +1072,10 @@
 
     .port {
       width: min(100%, 130px);
+    }
+
+    .cidr {
+      width: 100%;
     }
   }
 </style>

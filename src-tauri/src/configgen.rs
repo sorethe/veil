@@ -10,7 +10,8 @@ use std::path::Path;
 pub const MIXED_TAG: &str = "veil-mixed";
 pub const TUN_TAG: &str = "veil-tun";
 pub const TUN_INTERFACE: &str = "veil0";
-pub const TUN_ADDRESS: [&str; 2] = ["172.19.0.1/30", "fdfe:dcba:9876::1/126"];
+pub const DEFAULT_TUN_ADDRESS: &str = "172.19.0.1/30";
+pub const DEFAULT_TUN_ADDRESS6: &str = "fdfe:dcba:9876::1/126";
 pub const LAN_EXCLUDES: [&str; 8] = [
     "10.0.0.0/8",
     "172.16.0.0/12",
@@ -29,6 +30,8 @@ pub struct GenOptions {
     pub api_port: u16,
     pub auto_redirect: bool,
     pub log_level: String,
+    pub tun_address: String,
+    pub tun_address6: String,
 }
 
 impl Default for GenOptions {
@@ -39,6 +42,22 @@ impl Default for GenOptions {
             api_port: 9090,
             auto_redirect: false,
             log_level: "info".into(),
+            tun_address: DEFAULT_TUN_ADDRESS.into(),
+            tun_address6: DEFAULT_TUN_ADDRESS6.into(),
+        }
+    }
+}
+
+impl GenOptions {
+    pub fn from_settings(settings: &crate::settings::Settings) -> Self {
+        Self {
+            mode: settings.mode.clone(),
+            mixed_port: settings.mixed_port,
+            api_port: settings.api_port,
+            auto_redirect: settings.auto_redirect,
+            log_level: settings.log_level.clone(),
+            tun_address: settings.tun_address.clone(),
+            tun_address6: settings.tun_address6.clone(),
         }
     }
 }
@@ -142,11 +161,15 @@ pub fn generate(raw: &str, opts: &GenOptions) -> Result<Generated, String> {
             "listen_port": opts.mixed_port
         }));
         if tun_mode {
+            crate::cidr::Cidr::parse_ipv4(&opts.tun_address)
+                .map_err(|e| format!("invalid tunAddress: {e}"))?;
+            crate::cidr::Cidr::parse_ipv6(&opts.tun_address6)
+                .map_err(|e| format!("invalid tunAddress6: {e}"))?;
             let mut tun = json!({
                 "type": "tun",
                 "tag": TUN_TAG,
                 "interface_name": TUN_INTERFACE,
-                "address": TUN_ADDRESS,
+                "address": [&opts.tun_address, &opts.tun_address6],
                 "mtu": 9000,
                 "auto_route": true,
                 "strict_route": true,
@@ -285,7 +308,10 @@ mod tests {
             .find(|i| i["tag"] == TUN_TAG)
             .unwrap();
         assert_eq!(tun["interface_name"], json!(TUN_INTERFACE));
-        assert_eq!(tun["address"], json!(TUN_ADDRESS));
+        assert_eq!(
+            tun["address"],
+            json!([DEFAULT_TUN_ADDRESS, DEFAULT_TUN_ADDRESS6])
+        );
         assert_eq!(tun["mtu"], json!(9000));
         assert_eq!(tun["auto_route"], json!(true));
         assert_eq!(tun["strict_route"], json!(true));
@@ -305,6 +331,70 @@ mod tests {
             .find(|i| i["tag"] == TUN_TAG)
             .unwrap();
         assert_eq!(tun["auto_redirect"], json!(true));
+    }
+
+    #[test]
+    fn tun_mode_uses_configured_addresses() {
+        let opts = GenOptions {
+            mode: "tun".into(),
+            tun_address: "10.77.0.1/30".into(),
+            tun_address6: "fdfe:1::1/126".into(),
+            ..GenOptions::default()
+        };
+        let generated = generate(&base_profile(), &opts).unwrap();
+        let tun = generated.value["inbounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["tag"] == TUN_TAG)
+            .unwrap();
+        assert_eq!(tun["address"], json!(["10.77.0.1/30", "fdfe:1::1/126"]));
+    }
+
+    #[test]
+    fn tun_mode_rejects_invalid_or_wrong_family_addresses() {
+        for (tun_address, tun_address6) in [
+            ("10.77.0.1", DEFAULT_TUN_ADDRESS6),
+            ("10.77.0.1/33", DEFAULT_TUN_ADDRESS6),
+            ("fdfe::1/126", DEFAULT_TUN_ADDRESS6),
+            (DEFAULT_TUN_ADDRESS, "10.77.0.1/30"),
+            (DEFAULT_TUN_ADDRESS, "fdfe::1/129"),
+        ] {
+            let opts = GenOptions {
+                mode: "tun".into(),
+                tun_address: tun_address.into(),
+                tun_address6: tun_address6.into(),
+                ..GenOptions::default()
+            };
+            assert!(
+                generate(&base_profile(), &opts).is_err(),
+                "{tun_address} / {tun_address6} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn system_mode_ignores_tun_addresses() {
+        let opts = GenOptions {
+            mode: "system".into(),
+            tun_address: "not-a-cidr".into(),
+            tun_address6: "also-not-one".into(),
+            ..GenOptions::default()
+        };
+        assert!(generate(&base_profile(), &opts).is_ok());
+    }
+
+    #[test]
+    fn options_from_settings_copy_tun_addresses() {
+        let settings = crate::settings::Settings {
+            tun_address: "10.1.0.1/30".into(),
+            tun_address6: "fdfe:9::1/126".into(),
+            ..crate::settings::Settings::default()
+        };
+        let opts = GenOptions::from_settings(&settings);
+        assert_eq!(opts.mode, "system");
+        assert_eq!(opts.tun_address, "10.1.0.1/30");
+        assert_eq!(opts.tun_address6, "fdfe:9::1/126");
     }
 
     #[test]
@@ -348,21 +438,28 @@ mod tests {
             "route": { "final": "direct" }
         })
         .to_string();
-        for auto_redirect in [false, true] {
-            let opts = GenOptions {
-                mode: "tun".into(),
-                auto_redirect,
-                ..GenOptions::default()
-            };
-            let generated = generate(&raw, &opts).unwrap();
-            let path = std::env::temp_dir().join(format!(
-                "veil-tun-check-{}-{auto_redirect}.json",
-                uuid::Uuid::new_v4()
-            ));
-            write_runtime_config(&path, &generated.json).unwrap();
-            let result = crate::core::check(std::path::Path::new(&core), &path);
-            let _ = std::fs::remove_file(&path);
-            result.expect("generated TUN config must pass sing-box check");
+        for (tun_address, tun_address6) in [
+            (DEFAULT_TUN_ADDRESS, DEFAULT_TUN_ADDRESS6),
+            ("10.77.0.1/30", "fdfe:1::1/126"),
+        ] {
+            for auto_redirect in [false, true] {
+                let opts = GenOptions {
+                    mode: "tun".into(),
+                    auto_redirect,
+                    tun_address: tun_address.into(),
+                    tun_address6: tun_address6.into(),
+                    ..GenOptions::default()
+                };
+                let generated = generate(&raw, &opts).unwrap();
+                let path = std::env::temp_dir().join(format!(
+                    "veil-tun-check-{}-{auto_redirect}.json",
+                    uuid::Uuid::new_v4()
+                ));
+                write_runtime_config(&path, &generated.json).unwrap();
+                let result = crate::core::check(std::path::Path::new(&core), &path);
+                let _ = std::fs::remove_file(&path);
+                result.expect("generated TUN config must pass sing-box check");
+            }
         }
     }
 

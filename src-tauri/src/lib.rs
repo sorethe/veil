@@ -1,3 +1,4 @@
+pub mod cidr;
 pub mod clash;
 pub mod configgen;
 pub mod core;
@@ -53,11 +54,7 @@ fn validate_profile_content(
     core::validate_content(
         &core_path,
         content,
-        &settings.mode,
-        settings.mixed_port,
-        settings.api_port,
-        settings.auto_redirect,
-        &settings.log_level,
+        &configgen::GenOptions::from_settings(settings),
     )
 }
 
@@ -288,9 +285,14 @@ async fn connect(
     mode: Option<String>,
     profile_id: Option<i64>,
 ) -> Result<EngineState, CommandError> {
-    let effective_mode = mode.clone().unwrap_or_else(|| state.settings.get().mode);
+    let settings = state.settings.get();
+    let effective_mode = mode.clone().unwrap_or_else(|| settings.mode.clone());
     if effective_mode == "tun" {
-        let setup = diagnostics::tun_setup(state.resource_dir.as_deref());
+        let setup = diagnostics::tun_setup(
+            state.resource_dir.as_deref(),
+            &settings.tun_address,
+            &settings.tun_address6,
+        );
         if !setup.ready {
             let detail = if setup.missing.is_empty() {
                 setup.detail
@@ -754,7 +756,12 @@ async fn run_diagnostics(
 
 #[tauri::command]
 async fn get_tun_setup(state: State<'_, AppState>) -> Result<diagnostics::TunSetup, CommandError> {
-    Ok(diagnostics::tun_setup(state.resource_dir.as_deref()))
+    let settings = state.settings.get();
+    Ok(diagnostics::tun_setup(
+        state.resource_dir.as_deref(),
+        &settings.tun_address,
+        &settings.tun_address6,
+    ))
 }
 
 /// Install the privileged helper and embedded polkit policy through pkexec.
@@ -813,7 +820,12 @@ async fn install_tun_helper(
                 .with_detail(detail),
         );
     }
-    Ok(diagnostics::tun_setup(state.resource_dir.as_deref()))
+    let settings = state.settings.get();
+    Ok(diagnostics::tun_setup(
+        state.resource_dir.as_deref(),
+        &settings.tun_address,
+        &settings.tun_address6,
+    ))
 }
 
 #[tauri::command]
