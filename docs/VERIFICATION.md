@@ -302,7 +302,7 @@ event names changed.
 | KDE/XFCE proxy backends | IMPLEMENTED, UNVERIFIED on this host |
 | Release app window + embedded assets + engine state + screenshot | MANUALLY-VERIFIED |
 | Real app connect + traffic + graceful disconnect via window close | MANUALLY-VERIFIED |
-| TUN activation / root / polkit authentication | UNVERIFIED (`veil-helper check` and TUN config check only) |
+| TUN activation / root / polkit authentication | **BLOCKED/UNVERIFIED** by concurrent Throne TUN route; no retry, no fake success |
 | Tray menu interaction and all 8 views | UI present; full interaction left to frontend inspection |
 | Concurrent Throne TUN | Acknowledged in attribution; not stopped/modified; no Veil system-wide routing claimed |
 
@@ -317,6 +317,35 @@ started root sing-box but it failed before an engine pid was recorded:
 mode was reset to `system`. The conflicting route belonged to the concurrent
 Throne TUN (`172.19.0.0/24 dev throne-tun`), which was left untouched. **TUN
 end-to-end is not verified/usable for Veil here.**
+
+### TUN acceptance check — blocked by concurrent Throne TUN
+
+Read-only checks were run; **Throne was not stopped or reconfigured** and no
+Veil TUN retry was performed:
+
+```bash
+ip -d link show throne-tun
+ip route show
+ip rule
+pgrep -af 'throne|sing-box|target/release/veil'
+```
+
+Observed state:
+
+- `throne-tun`: `<POINTOPOINT,MULTICAST,NOARP,UP,LOWER_UP> mtu 1500 ... tun type tun ...`
+- Route conflict: `172.19.0.0/24 dev throne-tun proto kernel scope link src 172.19.0.1`
+  (also a separate `198.18.0.0/30 dev Meta` route).
+- `ip rule` contains Throne/Meta policy rules (tables `1436053744`/`2022`,
+  fwmarks `0x2023/0x2024/0x2027`); these were left untouched.
+- `veil0` does not exist.
+- Veil remains in **system mode**: app pid `81408`, engine pid `81581`,
+  profile `Subscription Test` (id 2), Clash API 38267, focused on workspace 4.
+
+Why TUN is blocked: Veil's TUN config needs `172.19.0.0/30` on `veil0` with
+`172.19.0.1`; Throne already owns `172.19.0.0/24` on `throne-tun` with
+`172.19.0.1`, so adding Veil's route/address fails (`add route ... file
+exists`). Per instruction, TUN was **not retried** and Throne was not touched.
+Veil TUN end-to-end remains **UNVERIFIED/BLOCKED**; no TUN success is claimed.
 
 Diagnostics honesty: after tightening `permissions.helper`, the gated test
 reports `helper_installed=true`, `helper_path=.../helper/target/release/veil-helper`
