@@ -17,15 +17,15 @@ depends=(
   'gtk3'
   'webkit2gtk-4.1'
   'libsoup3'
-  'librsvg'
-  'libayatana-appindicator'
   'iproute2'
   'nftables'
   'polkit'
-  'zbar'
 )
 makedepends=('rust' 'nodejs' 'pnpm')
-optdepends=('sing-box: use a system-wide core instead of the bundled one')
+optdepends=(
+  'sing-box: use a system-wide core instead of the bundled one'
+  'zbar: QR code import (provides zbarimg)'
+)
 source=(
   "$pkgname-$pkgver.tar.gz"
   "sing-box-$_singbox_ver.tar.gz::https://github.com/SagerNet/sing-box/releases/download/v$_singbox_ver/sing-box-$_singbox_ver-linux-amd64.tar.gz"

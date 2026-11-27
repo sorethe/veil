@@ -19,7 +19,9 @@ privileged helper, `veil-helper`, that is started through `pkexec` for TUN mode.
 ## Build from source
 
 Prerequisites (Arch): `rust` (provides cargo), `nodejs`, `pnpm`, `webkit2gtk-4.1`, `gtk3`,
-`libsoup3`, `librsvg`, `libayatana-appindicator`, `iproute2`, `nftables`, `polkit`, `zbar`.
+`libsoup3`, `iproute2`, `nftables`, `polkit`. Optional at runtime: `zbar` (QR import via `zbarimg`),
+`sing-box` (system core). The tray uses the pure-Rust `ksni` crate over D-Bus, so no appindicator
+library is needed.
 
 ```sh
 cd /home/deus/veil
