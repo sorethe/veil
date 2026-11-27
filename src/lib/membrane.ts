@@ -1,13 +1,11 @@
 /**
- * Pure 3D geometry and state helpers for the experimental membrane prototype.
+ * Pure 3D geometry helpers for the membrane's decorative background.
  *
- * The decorative web is generated locally from a fixed seed. Real anchors are
- * only positioned and labelled from the live constellation model; nothing here
- * invents servers, regions, hops, or latency.
+ * The shells are generated locally from a fixed seed. Real endpoint and
+ * destination positions live in `membrane-ip.ts`; nothing here invents
+ * servers, regions, hops, latency, or traffic.
  */
 import type { EngineStatus } from "./api";
-
-export const ANCHOR_CAP = 42;
 
 const TAU = Math.PI * 2;
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
@@ -17,12 +15,6 @@ const SHELLS = [
   { radius: 0.9, count: 144, phase: 2.1, seed: 29 },
   { radius: 1.0, count: 168, phase: 4.3, seed: 47 },
 ] as const;
-
-export interface Vec3 {
-  x: number;
-  y: number;
-  z: number;
-}
 
 export interface MembranePoint {
   x: number;
@@ -41,25 +33,9 @@ export interface MembraneEdge {
   kind: 0 | 1 | 2;
 }
 
-export interface MembraneAnchorInput {
-  id: string;
-  label: string;
-  type: string;
-  delay: number | "error" | null;
-}
-
-export interface MembraneAnchor extends MembraneAnchorInput {
-  x: number;
-  y: number;
-  z: number;
-  /** Perspective-safe route curve from the membrane interior to this anchor. */
-  path: Vec3[];
-}
-
 export interface MembraneGeometry {
   points: MembranePoint[];
   edges: MembraneEdge[];
-  anchors: MembraneAnchor[];
 }
 
 export interface MembraneCamera {
@@ -80,11 +56,6 @@ export interface ScreenPoint {
   depth: number;
 }
 
-export interface AnchorCap<T> {
-  visible: T[];
-  hidden: number;
-}
-
 function mulberry32(seed: number): () => number {
   let state = seed >>> 0;
   return () => {
@@ -96,7 +67,7 @@ function mulberry32(seed: number): () => number {
   };
 }
 
-/** Stable FNV-1a hash; used for anchor placement and the deterministic cap. */
+/** Stable FNV-1a hash used for deterministic halo phases and cap slices. */
 export function stableHash(value: string): number {
   let hash = 2166136261;
   for (let i = 0; i < value.length; i++) hash = Math.imul(hash ^ value.charCodeAt(i), 16777619);
@@ -190,62 +161,8 @@ function buildEdges(
   return edges;
 }
 
-function buildRoutePath(anchor: Vec3): Vec3[] {
-  const radius = Math.hypot(anchor.x, anchor.y, anchor.z) || 1;
-  const dir = { x: anchor.x / radius, y: anchor.y / radius, z: anchor.z / radius };
-  const helper = Math.abs(dir.y) > 0.92 ? { x: 1, y: 0, z: 0 } : { x: 0, y: 1, z: 0 };
-  let tx = dir.y * helper.z - dir.z * helper.y;
-  let ty = dir.z * helper.x - dir.x * helper.z;
-  let tz = dir.x * helper.y - dir.y * helper.x;
-  const tangentLength = Math.hypot(tx, ty, tz) || 1;
-  tx /= tangentLength;
-  ty /= tangentLength;
-  tz /= tangentLength;
-
-  const p0 = { x: dir.x * 0.14, y: dir.y * 0.14, z: dir.z * 0.14 };
-  const p1 = { x: dir.x * 0.4 + tx * 0.22, y: dir.y * 0.4 + ty * 0.22, z: dir.z * 0.4 + tz * 0.22 };
-  const p2 = {
-    x: dir.x * 0.76 - tx * 0.17,
-    y: dir.y * 0.76 - ty * 0.17,
-    z: dir.z * 0.76 - tz * 0.17,
-  };
-
-  const samples: Vec3[] = [];
-  const steps = 30;
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps;
-    const mt = 1 - t;
-    const a = mt * mt * mt;
-    const b = 3 * mt * mt * t;
-    const c = 3 * mt * t * t;
-    const d = t * t * t;
-    samples.push({
-      x: a * p0.x + b * p1.x + c * p2.x + d * anchor.x,
-      y: a * p0.y + b * p1.y + c * p2.y + d * anchor.y,
-      z: a * p0.z + b * p1.z + c * p2.z + d * anchor.z,
-    });
-  }
-  return samples;
-}
-
-function anchorPosition(id: string): Vec3 {
-  const first = stableHash(id);
-  const second = stableHash(`membrane:${id}`);
-  const u = (first % 100003) / 100003;
-  const v = (second % 1000033) / 1000033;
-  const y = 1 - 2 * u;
-  const planar = Math.sqrt(Math.max(0, 1 - y * y));
-  const theta = v * TAU + 0.16 * Math.sin(u * 5.1 + v * 2.7);
-  const radius = 1.052 + 0.016 * Math.sin(theta * 2 + u * 7);
-  return {
-    x: Math.cos(theta) * planar * radius,
-    y: y * radius,
-    z: Math.sin(theta) * planar * radius,
-  };
-}
-
-/** Build the decorative shells, their edges, and positions for the real anchors. */
-export function buildMembraneGeometry(anchors: readonly MembraneAnchorInput[]): MembraneGeometry {
+/** Build the decorative shells and their edges once per component instance. */
+export function buildMembraneGeometry(): MembraneGeometry {
   const points: MembranePoint[] = [];
   const sections: { start: number; end: number; radius: number }[] = [];
 
@@ -290,16 +207,7 @@ export function buildMembraneGeometry(anchors: readonly MembraneAnchorInput[]): 
     sections.push({ start, end: points.length, radius: spec.radius });
   }
 
-  const seen = new Set<string>();
-  const placed: MembraneAnchor[] = [];
-  for (const input of anchors) {
-    if (seen.has(input.id)) continue;
-    seen.add(input.id);
-    const position = anchorPosition(input.id);
-    placed.push({ ...input, ...position, path: buildRoutePath(position) });
-  }
-
-  return { points, edges: buildEdges(points, sections), anchors: placed };
+  return { points, edges: buildEdges(points, sections) };
 }
 
 export function createCamera(): MembraneCamera {
@@ -355,8 +263,8 @@ export function projectPoint(
 }
 
 /**
- * Which path should be lit for this anchor. A real active-outbound change makes
- * the previous id fall to zero and the new id rise to one at the same rate.
+ * Which endpoint should be lit. A real active-endpoint change makes the
+ * previous key fall to zero and the new key rise at the same rate.
  */
 export function routeTarget(
   id: string,
@@ -374,39 +282,4 @@ export function routeTarget(
     return 0;
   }
   return 0;
-}
-
-/**
- * Active and selected anchors are always visible; the rest is a deterministic
- * hash-ordered slice so the same outbounds stay visible across renders.
- */
-export function capAnchors<T extends { id: string }>(
-  nodes: readonly T[],
-  activeId: string | null,
-  selectedId: string | null,
-  cap: number = ANCHOR_CAP,
-): AnchorCap<T> {
-  if (nodes.length <= cap) return { visible: nodes.slice(), hidden: 0 };
-
-  const essential = new Set<string>();
-  for (const id of [activeId, selectedId]) {
-    if (id && nodes.some((node) => node.id === id)) essential.add(id);
-  }
-
-  const rest = nodes.filter((node) => !essential.has(node.id));
-  rest.sort((a, b) => {
-    const hashA = stableHash(a.id);
-    const hashB = stableHash(b.id);
-    if (hashA !== hashB) return hashA - hashB;
-    return a.id.localeCompare(b.id);
-  });
-
-  const chosen = new Set(essential);
-  const room = Math.max(0, cap - chosen.size);
-  for (let i = 0; i < room; i++) chosen.add(rest[i].id);
-
-  return {
-    visible: nodes.filter((node) => chosen.has(node.id)),
-    hidden: nodes.length - chosen.size,
-  };
 }
