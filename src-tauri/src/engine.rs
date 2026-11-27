@@ -19,7 +19,7 @@ use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncSeekExt, BufReader};
 use tokio::process::Child;
 use tokio::sync::Mutex as AsyncMutex;
@@ -67,6 +67,19 @@ pub struct Stats {
     pub latency: Option<u64>,
 }
 
+/// Event boundary for the engine. The app uses the Tauri AppHandle; the
+/// lifecycle harness uses a recorder. This keeps engine state observable
+/// without simulating any engine behavior.
+pub trait EventSink: Send + Sync + 'static {
+    fn emit(&self, event: &str, payload: Value);
+}
+
+impl EventSink for AppHandle {
+    fn emit(&self, event: &str, payload: Value) {
+        let _ = tauri::Emitter::emit(self, event, payload);
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeFile {
@@ -82,7 +95,7 @@ pub struct RuntimeFile {
 }
 
 pub struct Engine {
-    app: AppHandle,
+    events: Arc<dyn EventSink>,
     settings: Arc<SettingsStore>,
     db: Arc<Db>,
     pub logs: Arc<LogStore>,
@@ -174,14 +187,14 @@ fn parse_helper_response(output: &std::process::Output, action: &str) -> Result<
 
 impl Engine {
     pub fn new(
-        app: AppHandle,
+        events: Arc<dyn EventSink>,
         settings: Arc<SettingsStore>,
         db: Arc<Db>,
         logs: Arc<LogStore>,
         resource_dir: Option<PathBuf>,
     ) -> Arc<Self> {
         Arc::new(Self {
-            app,
+            events,
             settings,
             db,
             logs,
@@ -208,7 +221,10 @@ impl Engine {
             mutate(&mut guard);
             guard.clone()
         };
-        let _ = self.app.emit("engine://state", &state);
+        self.events.emit(
+            "engine://state",
+            serde_json::to_value(&state).unwrap_or(Value::Null),
+        );
         state
     }
 
@@ -217,14 +233,18 @@ impl Engine {
             let mut guard = self.state.lock().unwrap();
             *guard = next.clone();
         }
-        let _ = self.app.emit("engine://state", &next);
+        self.events.emit(
+            "engine://state",
+            serde_json::to_value(&next).unwrap_or(Value::Null),
+        );
         next
     }
 
     fn notice(&self, level: &str, message: &str) {
-        let _ = self
-            .app
-            .emit("engine://notice", json!({ "level": level, "message": message }));
+        self.events.emit(
+            "engine://notice",
+            json!({ "level": level, "message": message }),
+        );
     }
 
     fn notify_desktop(&self, title: &str, body: &str) {
@@ -713,7 +733,10 @@ impl Engine {
                     guard.duration = (now() - started_at).max(0);
                     guard.clone()
                 };
-                let _ = engine.app.emit("engine://stats", &stats);
+                engine.events.emit(
+                    "engine://stats",
+                    serde_json::to_value(&stats).unwrap_or(Value::Null),
+                );
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
         })
@@ -1233,6 +1256,11 @@ impl Engine {
                 self.snapshot().status.as_str(),
                 "starting" | "connected" | "stopping"
             )
+            || self
+                .snapshot()
+                .pid
+                .map(pid_alive)
+                .unwrap_or(false)
     }
 
     pub fn is_shutting_down(&self) -> bool {

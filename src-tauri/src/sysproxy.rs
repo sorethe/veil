@@ -678,6 +678,73 @@ mod tests {
         assert!(!command_exists("definitely-not-a-veil-command"));
     }
 
+    fn gsettings_available() -> bool {
+        Command::new("gsettings")
+            .args(["get", GNOME_SCHEMA, "mode"])
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+    }
+
+    #[test]
+    fn gnome_apply_restore_roundtrip_when_enabled() {
+        if std::env::var("VEIL_TEST_GSETTINGS").ok().as_deref() != Some("1") {
+            return;
+        }
+        if !gsettings_available() {
+            eprintln!("skip: org.gnome.system.proxy schema unavailable");
+            return;
+        }
+        if paths::sysproxy_state_path().exists() {
+            eprintln!("skip: existing sysproxy state file (refusing to clobber)");
+            return;
+        }
+        let before = gnome_snapshot().expect("snapshot current GNOME proxy values");
+        struct RestoreOnDrop;
+        impl Drop for RestoreOnDrop {
+            fn drop(&mut self) {
+                let _ = restore();
+            }
+        }
+        let _guard = RestoreOnDrop;
+        let info = apply_gnome(18081).expect("apply GNOME proxy");
+        assert_eq!(info.kind, "gnome");
+        assert_eq!(
+            gsettings_get(GNOME_SCHEMA, "mode").unwrap().as_deref(),
+            Some("'manual'")
+        );
+        assert_eq!(
+            gsettings_get("org.gnome.system.proxy.http", "port")
+                .unwrap()
+                .as_deref(),
+            Some("18081")
+        );
+        restore().expect("restore GNOME proxy");
+        assert_eq!(gnome_snapshot().unwrap(), before, "exact previous values restored");
+        assert!(!paths::sysproxy_state_path().exists());
+    }
+
+    #[test]
+    fn unsupported_desktop_apply_is_a_noop_when_enabled() {
+        if std::env::var("VEIL_TEST_GSETTINGS").ok().as_deref() != Some("1") {
+            return;
+        }
+        if !gsettings_available() {
+            return;
+        }
+        if paths::sysproxy_state_path().exists() {
+            return;
+        }
+        let before = gnome_snapshot().unwrap();
+        assert_eq!(proxy_kind_from_desktop("Hyprland"), "unsupported");
+        if system_proxy_kind() == "unsupported" {
+            let info = apply(18082).expect("unsupported apply must be reported, not fatal");
+            assert_eq!(info.kind, "unsupported");
+            assert!(!paths::sysproxy_state_path().exists());
+        }
+        assert_eq!(gnome_snapshot().unwrap(), before);
+    }
+
     #[test]
     fn collects_proxy_env_without_inventing() {
         let values = proxy_env();

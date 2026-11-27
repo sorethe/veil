@@ -164,7 +164,7 @@ fn validate_json_subscription(text: &str) -> Result<String, String> {
 /// Turn a subscription body into sing-box JSON. Supports JSON, base64
 /// (JSON or share-link lists), and plain share-link lists. Clash YAML is
 /// rejected explicitly instead of being mis-converted.
-fn normalize_subscription_body(body: &str) -> Result<String, String> {
+pub fn normalize_subscription_body(body: &str) -> Result<String, String> {
     let text = body.trim();
     if text.is_empty() {
         return Err("subscription response is empty".into());
@@ -818,7 +818,7 @@ pub fn run() {
             logs.attach(handle.clone());
             let resource_dir = app.path().resource_dir().ok();
             let engine = Engine::new(
-                handle.clone(),
+                Arc::new(handle.clone()),
                 settings.clone(),
                 db.clone(),
                 logs.clone(),
@@ -929,4 +929,59 @@ pub fn run() {
             }
             _ => {}
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn json_subscription() -> String {
+        serde_json::json!({
+            "outbounds": [
+                { "type": "selector", "tag": "Proxy", "outbounds": ["direct"] },
+                { "type": "direct", "tag": "direct" }
+            ],
+            "route": { "final": "Proxy" }
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn subscription_rejects_clash_yaml() {
+        let error = normalize_subscription_body("mixed-port: 7890\nproxies:\n  - name: node\n")
+            .unwrap_err();
+        assert!(error.contains("Clash YAML"), "{error}");
+    }
+
+    #[test]
+    fn subscription_accepts_singbox_json_and_rejects_missing_outbounds() {
+        let normalized = normalize_subscription_body(&json_subscription()).unwrap();
+        assert!(normalized.contains("outbounds"));
+        let error = normalize_subscription_body(r#"{"log":{"level":"info"}}"#).unwrap_err();
+        assert!(error.contains("no outbounds"), "{error}");
+        let error = normalize_subscription_body("{not json").unwrap_err();
+        assert!(error.contains("unrecognized") || error.contains("invalid"), "{error}");
+    }
+
+    #[test]
+    fn subscription_accepts_base64_json_and_links() {
+        let encoded = STANDARD.encode(json_subscription());
+        assert!(normalize_subscription_body(&encoded).is_ok());
+        let links = "vless://11111111-2222-3333-4444-555555555555@example.com:443?encryption=none&security=tls#Node";
+        let encoded = STANDARD.encode(links);
+        let normalized = normalize_subscription_body(&encoded).unwrap();
+        let value: Value = serde_json::from_str(&normalized).unwrap();
+        assert_eq!(value["route"]["final"], "Proxy");
+        assert!(value["outbounds"].as_array().unwrap().len() >= 2);
+    }
+
+    #[test]
+    fn subscription_accepts_plain_link_list() {
+        let normalized = normalize_subscription_body(
+            "ss://YWVzLTI1Ni1nY206cHc=@example.com:8388#SS\nhttp://proxy.example.com:8080",
+        )
+        .unwrap();
+        let value: Value = serde_json::from_str(&normalized).unwrap();
+        assert_eq!(value["route"]["final"], "Proxy");
+    }
 }

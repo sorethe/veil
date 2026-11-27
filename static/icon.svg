@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Veil application icon">
+  <rect width="512" height="512" rx="56" fill="#0A0C0E"/>
+  <g transform="translate(64 64) scale(12)" fill="none" stroke="#C7F26B" stroke-width="1.2" stroke-linejoin="miter">
+    <path d="M16 2.6 27.9 9.3v13.4L16 29.4 4.1 22.7V9.3Z"/>
+    <path d="M16 8.6 22.6 12.3v7.4L16 23.4 9.4 19.7v-7.4Z" stroke-width="0.95" opacity="0.7"/>
+    <path d="M16 8.6 9.4 12.3M22.6 19.7 16 23.4" stroke-width="0.95" opacity="0.7"/>
+    <path d="M16 13.5v5" stroke-width="1.4"/>
+  </g>
+</svg>

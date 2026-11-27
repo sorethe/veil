@@ -13,6 +13,13 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+[features]
+# Embed the built frontend instead of loading build.devUrl. Enabled by default
+# so a plain `cargo build --release` produces a standalone binary; use
+# `cargo build --no-default-features` for a Tauri dev-server build.
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
 [dependencies]
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }

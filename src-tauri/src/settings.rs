@@ -104,7 +104,12 @@ pub struct SettingsStore {
 
 impl SettingsStore {
     pub fn load() -> Self {
-        let path = paths::settings_path();
+        Self::with_path(paths::settings_path())
+    }
+
+    /// Load settings from an explicit path; used by the lifecycle harness and
+    /// tests without touching the user's config directory.
+    pub fn with_path(path: PathBuf) -> Self {
         let settings = match fs::read_to_string(&path) {
             Ok(raw) => match serde_json::from_str::<Settings>(&raw) {
                 Ok(mut s) => {

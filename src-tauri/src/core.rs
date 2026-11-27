@@ -419,6 +419,30 @@ mod tests {
     }
 
     #[test]
+    fn validates_real_sing_box_configs() {
+        let Ok(core) = std::env::var("VEIL_SINGBOX") else {
+            return;
+        };
+        let core = Path::new(&core);
+        let valid = r#"{"outbounds":[{"type":"direct","tag":"direct"}]}"#;
+        assert!(validate_content(core, valid, "system", 2080, 9090, false, "info").is_ok());
+        let subscription_style = r#"{
+            "outbounds": [
+                {"type":"selector","tag":"Proxy","outbounds":["node-a","node-b"]},
+                {"type":"direct","tag":"node-a"},
+                {"type":"direct","tag":"node-b"}
+            ],
+            "route": {"final": "Proxy"}
+        }"#;
+        let tags = validate_content(core, subscription_style, "system", 2080, 9090, false, "info")
+            .expect("subscription-style sing-box config must pass real check");
+        assert!(tags.contains(&"Proxy".to_string()));
+        assert!(validate_content(core, "{ this is not json", "system", 2080, 9090, false, "info").is_err());
+        assert!(validate_content(core, r#"{"log":{"level":"info"}}"#, "system", 2080, 9090, false, "info").is_err());
+        assert!(validate_content(core, r#"{"outbounds":[]}"#, "system", 2080, 9090, false, "info").is_err());
+    }
+
+    #[test]
     fn version_compare_handles_numeric_segments() {
         assert!(version_at_least("1.14.5", "1.10"));
         assert!(version_at_least("2.0.0", "1.99.99"));

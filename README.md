@@ -81,9 +81,13 @@ cargo build --release   # builds target/release/veil
 cargo build --release --manifest-path helper/Cargo.toml  # veil-helper
 ```
 
-For development use `pnpm tauri dev` (Vite on 127.0.0.1:1420); a GUI session is
-required to show the window. The backend itself has no display dependency and is
-covered by unit tests and the real-engine smoke harness.
+`src-tauri/Cargo.toml` enables Tauri's `custom-protocol` feature by default so a
+plain `cargo build --release` embeds `dist/` and the release binary is
+standalone. For a Tauri dev-server build that loads `devUrl` instead, disable
+default features (`cargo build --no-default-features`); normal UI work can also
+use Vite directly. A GUI session is required to show the window. The backend
+itself has no display dependency and is covered by unit tests and the
+real-engine smoke/lifecycle harnesses.
 
 ## sing-box core discovery
 

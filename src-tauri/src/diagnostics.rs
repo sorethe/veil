@@ -107,7 +107,7 @@ pub fn find_helper(resource_dir: Option<&Path>) -> Option<PathBuf> {
     if let Ok(exe) = env::current_exe() {
         if let Some(dir) = exe.parent() {
             candidates.push(dir.join("veil-helper"));
-            for ancestor in dir.ancestors().take(5) {
+            for ancestor in dir.ancestors().take(8) {
                 candidates.push(ancestor.join("veil-helper"));
                 candidates.push(ancestor.join("helper").join("target").join("release").join("veil-helper"));
                 candidates.push(ancestor.join("helper").join("target").join("debug").join("veil-helper"));
@@ -292,6 +292,11 @@ pub fn run(
     };
     let policy = polkit_policy_installed();
     let polkit = policy && command_exists("pkexec");
+    let helper_privileged = Path::new("/usr/bin/veil-helper").exists()
+        || Path::new("/usr/local/bin/veil-helper").exists();
+    // "permission" means a usable privileged helper + installed polkit action,
+    // not merely a dev-build binary found beside the target directory.
+    let helper_permitted = helper.installed && helper_privileged && polkit;
     let policy_shipped = resource_dir
         .map(|dir| {
             dir.join("dev.veil.helper.policy").exists() || dir.join("veil-helper.policy").exists()
@@ -334,6 +339,11 @@ pub fn run(
             "veil-helper is not installed; TUN mode will fail. Install it with the helper install script."
                 .into(),
         );
+    } else if !helper_privileged {
+        errors.push(
+            "veil-helper is only a development build (not /usr/bin/veil-helper); TUN mode needs the installed helper."
+                .into(),
+        );
     }
     if !policy {
         let detail = if policy_shipped {
@@ -356,7 +366,7 @@ pub fn run(
         capabilities,
         permissions: Permissions {
             user,
-            helper: helper.installed,
+            helper: helper_permitted,
             polkit,
             tun_device,
             nft,
@@ -400,6 +410,29 @@ mod tests {
         let found = find_helper(None);
         if let Some(path) = &found {
             assert!(path.exists());
+        }
+    }
+
+    #[test]
+    fn helper_permission_requires_privileged_helper_and_policy() {
+        let diag = run(CoreInfo::default(), None, &LogStore::new(), None);
+        let policy = Path::new("/usr/share/polkit-1/actions/dev.veil.helper.policy").exists()
+            || Path::new("/usr/share/polkit-1/actions/veil-helper.policy").exists();
+        let privileged = Path::new("/usr/bin/veil-helper").exists()
+            || Path::new("/usr/local/bin/veil-helper").exists();
+        let expected = diag.helper.installed && privileged && policy && command_exists("pkexec");
+        eprintln!(
+            "helper_installed={} helper_path={:?} polkit={} helper_permission={} privileged_helper={} policy={}",
+            diag.helper.installed,
+            diag.helper.path,
+            diag.permissions.polkit,
+            diag.permissions.helper,
+            privileged,
+            policy
+        );
+        assert_eq!(diag.permissions.helper, expected);
+        if !policy {
+            assert!(!diag.permissions.helper, "dev helper must not imply permission");
         }
     }
 
