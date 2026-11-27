@@ -1,9 +1,12 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import BottomStatus from "./lib/components/BottomStatus.svelte";
   import Mark from "./lib/components/Mark.svelte";
   import Sidebar from "./lib/components/Sidebar.svelte";
   import ToastHost from "./lib/components/ToastHost.svelte";
+  import TopBar from "./lib/components/TopBar.svelte";
   import { statusWord } from "./lib/format";
+  import { outboundStore } from "./lib/outbounds.svelte";
   import { app, type View } from "./lib/state.svelte";
   import Connections from "./lib/views/Connections.svelte";
   import Diagnostics from "./lib/views/Diagnostics.svelte";
@@ -25,11 +28,22 @@
     settings: "Settings",
   };
 
+  let scroller = $state<HTMLDivElement | null>(null);
+
   onMount(() => {
     void app.init();
     return () => {
       void app.dispose();
     };
+  });
+
+  $effect(() => {
+    outboundStore.syncEngine(app.engine.status, app.engine.startedAt);
+  });
+
+  $effect(() => {
+    void app.view;
+    scroller?.scrollTo({ top: 0, behavior: "auto" });
   });
 
   $effect(() => {
@@ -82,25 +96,29 @@
   <div class="app-shell">
     <Sidebar />
     <main class="main">
-      <div class="main-inner">
-        {#if app.view === "overview"}
-          <Overview {navigate} />
-        {:else if app.view === "profiles"}
-          <Profiles {navigate} />
-        {:else if app.view === "routing"}
-          <Routing />
-        {:else if app.view === "outbounds"}
-          <Outbounds {navigate} />
-        {:else if app.view === "connections"}
-          <Connections {navigate} />
-        {:else if app.view === "logs"}
-          <Logs />
-        {:else if app.view === "diagnostics"}
-          <Diagnostics />
-        {:else}
-          <Settings />
-        {/if}
+      <TopBar />
+      <div class="main-scroll" bind:this={scroller}>
+        <div class="main-inner" class:main-inner--overview={app.view === "overview"}>
+          {#if app.view === "overview"}
+            <Overview {navigate} />
+          {:else if app.view === "profiles"}
+            <Profiles {navigate} />
+          {:else if app.view === "routing"}
+            <Routing />
+          {:else if app.view === "outbounds"}
+            <Outbounds {navigate} />
+          {:else if app.view === "connections"}
+            <Connections {navigate} />
+          {:else if app.view === "logs"}
+            <Logs />
+          {:else if app.view === "diagnostics"}
+            <Diagnostics />
+          {:else}
+            <Settings />
+          {/if}
+        </div>
       </div>
+      <BottomStatus />
     </main>
   </div>
   <p class="visually-hidden-live" aria-live="polite">

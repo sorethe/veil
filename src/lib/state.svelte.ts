@@ -99,6 +99,8 @@ class AppStore {
 
   toasts = $state<ToastItem[]>([]);
   view = $state<View>(readView());
+  /** Profile prepared for the next connect; synced to the live session when one starts. */
+  selectedProfileId = $state<ProfileId | null>(null);
 
   connectBusy = $state(false);
   systemDark = $state(true);
@@ -113,6 +115,12 @@ class AppStore {
 
   get settings(): Settings | null {
     return this.boot?.settings ?? null;
+  }
+
+  get selectedProfile(): Profile | null {
+    const id = this.selectedProfileId;
+    if (id === null) return null;
+    return this.profiles.find((profile) => String(profile.id) === String(id)) ?? null;
   }
 
   get platform(): PlatformInfo | null {
@@ -212,6 +220,7 @@ class AppStore {
       this.boot = info;
       if (this.#stateEventSeq === stateSeq) this.engine = info.engine;
       if (this.#profilesEventSeq === profilesSeq) this.profiles = info.profiles;
+      this.syncSelectedProfile();
       this.booting = false;
       void this.loadInitialData();
     } catch (error) {
@@ -235,6 +244,7 @@ class AppStore {
       this.boot = info;
       if (this.#stateEventSeq === stateSeq) this.engine = info.engine;
       if (this.#profilesEventSeq === profilesSeq) this.profiles = info.profiles;
+      this.syncSelectedProfile();
       return null;
     } catch (error) {
       return errorMessage(error);
@@ -259,6 +269,9 @@ class AppStore {
         await events.onState((state) => {
           this.#stateEventSeq += 1;
           this.engine = state;
+          if (state.status === "connected" && state.profileId !== null) {
+            this.selectedProfileId = state.profileId;
+          }
           if (state.status !== "connected") {
             this.history = [];
           }
@@ -294,6 +307,7 @@ class AppStore {
         await events.onProfilesChanged((profiles) => {
           this.#profilesEventSeq += 1;
           this.profiles = profiles;
+          this.syncSelectedProfile();
         }),
       );
     } catch {
@@ -330,11 +344,36 @@ class AppStore {
     if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "auto" });
   }
 
+  /** Chooses the profile used for the next connect; ignored by an already-live session. */
+  setSelectedProfile(id: ProfileId | null): void {
+    this.selectedProfileId = id;
+  }
+
+  /** Keeps a valid user choice, otherwise falls back to the engine or first profile. */
+  private syncSelectedProfile(): void {
+    const current = this.selectedProfileId;
+    if (
+      current !== null &&
+      this.profiles.some((profile) => String(profile.id) === String(current))
+    ) {
+      return;
+    }
+    const engineId = this.engine.profileId;
+    const engineProfile =
+      engineId === null
+        ? undefined
+        : this.profiles.find((profile) => String(profile.id) === String(engineId));
+    this.selectedProfileId = engineProfile?.id ?? this.profiles[0]?.id ?? null;
+  }
+
   async connect(profileId?: ProfileId, mode?: Mode): Promise<boolean> {
     if (this.connectBusy) return false;
     this.connectBusy = true;
     try {
-      await api.connect(mode ?? this.settings?.mode, profileId);
+      await api.connect(
+        mode ?? this.settings?.mode,
+        profileId ?? this.selectedProfileId ?? undefined,
+      );
       return true;
     } catch (error) {
       this.notify("error", "Could not connect", errorMessage(error));
@@ -361,6 +400,7 @@ class AppStore {
   async refreshProfiles(silent = false): Promise<void> {
     try {
       this.profiles = await api.listProfiles();
+      this.syncSelectedProfile();
     } catch (error) {
       if (!silent) this.notify("error", "Could not load profiles", errorMessage(error));
     }

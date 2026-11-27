@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { statusWord } from "../format";
+  import { formatBytes, formatSpeed, statusWord } from "../format";
   import { app, type View } from "../state.svelte";
   import type { IconName } from "../icons";
   import Icon from "./Icon.svelte";
@@ -17,16 +17,17 @@
   ];
 
   const activeProfile = $derived(
-    app.profiles.find(
-      (profile) =>
-        app.engine.profileId !== null && String(profile.id) === String(app.engine.profileId),
-    ) ?? null,
+    app.engine.profileId === null
+      ? null
+      : (app.profiles.find((profile) => String(profile.id) === String(app.engine.profileId)) ??
+          null),
   );
   const profileName = $derived(
-    app.engine.profileName ??
-      activeProfile?.name ??
-      (app.profiles.length ? "No active session" : "No profile"),
+    app.connected
+      ? (app.engine.profileName ?? activeProfile?.name ?? "Not reported")
+      : (app.selectedProfile?.name ?? activeProfile?.name ?? "No profile"),
   );
+  const profileCaption = $derived(app.connected ? "Active profile" : "Next session");
   const engineInfo = $derived(app.engineInfo);
   const coreHealth = $derived(
     !app.core
@@ -53,6 +54,16 @@
           app.engine.mode ? ` · ${app.engine.mode === "tun" ? "TUN" : "SYSTEM"}` : ""
         }`,
   );
+  const downSpeed = $derived(app.connected ? formatSpeed(app.stats.downSpeed) : "—");
+  const upSpeed = $derived(app.connected ? formatSpeed(app.stats.upSpeed) : "—");
+  const sessionTotal = $derived(
+    app.connected ? `${formatBytes(app.stats.down)} ↓ · ${formatBytes(app.stats.up)} ↑` : "—",
+  );
+  const trafficTitle = $derived(
+    app.connected
+      ? `Session totals: ${formatBytes(app.stats.down)} down, ${formatBytes(app.stats.up)} up`
+      : "No live session",
+  );
 </script>
 
 <aside class="sidebar" aria-label="Application">
@@ -61,6 +72,7 @@
     class="brand"
     onclick={() => app.setView("overview")}
     aria-label="Veil overview"
+    title="Veil overview"
   >
     <span class="brand__mark"><Mark size={23} /></span>
     <span class="brand__text">
@@ -94,14 +106,32 @@
   <div class="sidebar__foot">
     <div class="profile-block">
       <div class="profile-block__head">
-        <span class="kicker">Active profile</span>
+        <span class="kicker">{profileCaption}</span>
         <StatusGlyph status={app.engine.status} size={9} />
       </div>
       <p class="profile-block__name" title={profileName}>{profileName}</p>
-      <p class="profile-block__state {`st-${app.engine.status}`}">
-        {sessionLabel}
-      </p>
+      <p class="profile-block__state st-{app.engine.status}">{sessionLabel}</p>
     </div>
+
+    <dl
+      class="traffic"
+      class:traffic--idle={!app.connected}
+      aria-label="Session traffic"
+      title={trafficTitle}
+    >
+      <div class="traffic__row">
+        <dt>Down</dt>
+        <dd class="num">{downSpeed}</dd>
+      </div>
+      <div class="traffic__row">
+        <dt>Up</dt>
+        <dd class="num">{upSpeed}</dd>
+      </div>
+      <div class="traffic__row traffic__row--total">
+        <dt>Session</dt>
+        <dd class="num" title={trafficTitle}>{sessionTotal}</dd>
+      </div>
+    </dl>
 
     <button
       type="button"
@@ -114,12 +144,18 @@
       <span class="core__label">{coreHealth}</span>
     </button>
 
+    {#if app.version}
+      <p class="foot-version mono" title="Veil version">v{app.version}</p>
+    {/if}
+
     <div class="foot-actions">
       <button
         type="button"
         class="foot-link"
         class:foot-link--active={app.view === "settings"}
+        aria-current={app.view === "settings" ? "page" : undefined}
         aria-label="Settings"
+        title="Settings"
         onclick={() => app.setView("settings")}
       >
         <Icon name="settings" size={15} />
@@ -140,30 +176,33 @@
 
 <style>
   .sidebar {
-    position: fixed;
-    inset: 0 auto 0 0;
-    width: var(--sidebar-w);
-    background: var(--surface);
-    border-right: 1px solid var(--line);
+    grid-column: 1;
+    grid-row: 1;
     display: flex;
     flex-direction: column;
-    z-index: 20;
+    width: 100%;
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
     overflow-y: auto;
+    background: var(--surface);
+    border-right: 1px solid var(--line);
+    z-index: 20;
   }
 
   .brand {
     display: flex;
     align-items: center;
     gap: 10px;
+    width: 100%;
     padding: var(--space-5) var(--space-4) var(--space-4);
     text-align: left;
     color: var(--text);
-    width: 100%;
   }
 
   .brand__mark {
-    color: var(--text);
     display: flex;
+    color: var(--text);
   }
 
   .brand__text {
@@ -189,13 +228,13 @@
   }
 
   .nav {
-    padding: var(--space-3) 8px;
     flex: 1 1 auto;
+    padding: var(--space-2) 8px;
   }
 
   .nav ul {
     display: grid;
-    gap: 1px;
+    gap: 2px;
   }
 
   .nav__item {
@@ -204,9 +243,9 @@
     align-items: center;
     gap: 10px;
     width: 100%;
-    padding: 8px 8px 8px 10px;
+    padding: 8px 10px;
     color: var(--muted);
-    border-radius: 1px;
+    border-radius: var(--radius);
     text-align: left;
     transition:
       color var(--fast) var(--ease),
@@ -215,24 +254,24 @@
 
   .nav__item:hover:not(.nav__item--active) {
     color: var(--text);
-    background: transparent;
+    background: var(--row-hover);
   }
 
   .nav__index {
+    width: 16px;
+    flex: none;
     font-family: var(--font-mono);
     font-size: 9px;
     color: var(--faint);
-    width: 16px;
-    flex: none;
   }
 
   .nav__label {
-    font-size: var(--fs-sm);
-    font-weight: 450;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-size: var(--fs-sm);
+    font-weight: 450;
   }
 
   .nav__item--active {
@@ -244,21 +283,22 @@
     content: "";
     position: absolute;
     left: 0;
-    top: 5px;
-    bottom: 5px;
+    top: 8px;
+    bottom: 8px;
     width: 2px;
+    border-radius: 1px;
     background: var(--accent);
   }
 
   .nav__item--active .nav__index {
-    color: var(--accent);
+    color: var(--muted);
   }
 
   .sidebar__foot {
-    border-top: 1px solid var(--line);
-    padding: var(--space-3) var(--space-4) var(--space-4);
     display: grid;
     gap: var(--space-3);
+    padding: var(--space-3) var(--space-4) var(--space-4);
+    border-top: 1px solid var(--line);
   }
 
   .profile-block {
@@ -275,10 +315,11 @@
   }
 
   .profile-block__name {
-    font-size: var(--fs-sm);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-size: var(--fs-sm);
+    color: var(--text);
   }
 
   .profile-block__state {
@@ -287,15 +328,64 @@
     letter-spacing: 0.1em;
   }
 
+  .traffic {
+    display: grid;
+    gap: 2px;
+    margin: 0;
+    padding: 8px 0;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .traffic__row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .traffic dt {
+    flex: none;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--faint);
+  }
+
+  .traffic dd {
+    overflow: hidden;
+    color: var(--text);
+    font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .traffic__row--total {
+    padding-top: 2px;
+  }
+
+  .traffic__row--total dt {
+    color: var(--muted);
+  }
+
+  .traffic__row--total dd {
+    color: var(--muted);
+    font-size: 9px;
+  }
+
+  .traffic--idle dd {
+    color: var(--faint);
+  }
+
   .core {
     display: flex;
     align-items: center;
     gap: 7px;
-    text-align: left;
-    padding: 6px 0;
-    border-top: 1px solid var(--line);
-    border-bottom: 1px solid var(--line);
     min-width: 0;
+    padding: 2px 0;
+    text-align: left;
   }
 
   .core:hover .core__label {
@@ -305,9 +395,9 @@
   .core__dot {
     width: 6px;
     height: 6px;
+    flex: none;
     border-radius: 50%;
     background: var(--faint);
-    flex: none;
   }
 
   .core__dot--ok {
@@ -323,13 +413,20 @@
   }
 
   .core__label {
+    overflow: hidden;
     font-family: var(--font-mono);
     font-size: 9px;
     letter-spacing: 0.06em;
     color: var(--muted);
-    white-space: nowrap;
-    overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .foot-version {
+    margin-top: -4px;
+    font-size: 9px;
+    letter-spacing: 0.08em;
+    color: var(--faint);
   }
 
   .foot-actions {
@@ -344,11 +441,15 @@
     gap: 9px;
     height: 30px;
     padding: 0 8px;
-    color: var(--muted);
     border: 1px solid transparent;
     border-radius: var(--radius);
+    color: var(--muted);
     font-size: var(--fs-xs);
     text-align: left;
+    transition:
+      color var(--fast) var(--ease),
+      background-color var(--fast) var(--ease),
+      border-color var(--fast) var(--ease);
   }
 
   .foot-link:hover {
@@ -359,6 +460,8 @@
 
   .foot-link--active {
     color: var(--text);
+    background: var(--raised);
+    border-color: var(--line);
   }
 
   .foot-link--icon {
@@ -367,26 +470,27 @@
   }
 
   .foot-link__label {
-    white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   @media (max-width: 1080px) {
     .sidebar {
-      width: 64px;
       align-items: center;
     }
 
     .brand {
-      padding: var(--space-4) 0;
       justify-content: center;
+      padding: var(--space-4) 0;
     }
 
     .brand__text,
     .nav__index,
     .nav__label,
     .profile-block,
+    .traffic,
+    .foot-version,
     .core__label,
     .foot-link__label {
       display: none;
@@ -399,8 +503,8 @@
 
     .nav__item {
       justify-content: center;
-      padding: 10px 0;
       gap: 0;
+      padding: 10px 0;
     }
 
     .nav__item--active::before {
@@ -409,17 +513,14 @@
 
     .sidebar__foot {
       width: 100%;
-      padding: var(--space-3) 8px var(--space-3);
+      gap: var(--space-2);
+      padding: var(--space-3) 8px;
       justify-items: center;
     }
 
     .core {
-      border-top: 0;
+      justify-content: center;
       padding: 4px 0 0;
-    }
-
-    .core__dot {
-      margin-top: 0;
     }
 
     .foot-actions {
