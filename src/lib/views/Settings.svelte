@@ -42,6 +42,12 @@
   const tunAvailable = $derived(app.tunReady);
   const autoRedirectAvailable = $derived(app.autoRedirectReady);
   const coreVersion = $derived(app.engineInfo?.version ?? app.core?.version ?? null);
+  const sessionLocked = $derived(
+    app.connected || app.busy || (app.engine.status === "error" && app.engine.pid !== null),
+  );
+  const liveMixedPort = $derived(
+    app.engine.mixedPort ?? (sessionLocked ? null : (app.settings?.mixedPort ?? null)),
+  );
   const tunReason = $derived(
     capabilities === null
       ? "Engine capabilities were not reported by the backend."
@@ -85,6 +91,22 @@
           ? "unknown"
           : "not checked",
   );
+  const manualNotice = $derived.by(() => {
+    if (app.manualSession) {
+      switch (app.manualSessionReason) {
+        case "apply-error":
+          return "This session is manual-only: the desktop proxy could not be applied. Apps must use the manual proxy; automatic coverage is not active.";
+        case "unknown":
+          return "This adopted session is manual-only: the desktop-proxy result is unknown. Use the manual proxy; automatic coverage is not confirmed.";
+        default:
+          return "This session is manual-only: this desktop has no desktop-wide proxy API. Apps must use the manual proxy; automatic coverage is not active.";
+      }
+    }
+    if (app.platform?.systemProxySupported === false) {
+      return "This desktop has no desktop-wide proxy API. A connected system-mode session will be manual-only; Veil will not claim automatic app coverage.";
+    }
+    return null;
+  });
 
   onMount(() => {
     void refreshTunSetup();
@@ -167,6 +189,10 @@
 
   function changeMode(next: string): void {
     if (!isMode(next)) return;
+    if (sessionLocked) {
+      errors.mode = "Disconnect before changing the session mode.";
+      return;
+    }
     const seq = ++modeSeq;
     if (next === "system") {
       mode = next;
@@ -239,6 +265,10 @@
   }
 
   function commitPort(field: "mixedPort" | "apiPort"): void {
+    if (sessionLocked) {
+      errors[field] = "Disconnect before changing ports for a live session.";
+      return;
+    }
     const raw = (field === "mixedPort" ? mixedPort : apiPort).trim();
     const value = Number(raw);
     if (!/^\d+$/.test(raw) || !Number.isInteger(value) || value < 1 || value > 65535) {
@@ -499,8 +529,12 @@
             value={mode}
             options={modeOptions}
             label="Default proxy mode"
+            disabled={sessionLocked}
             onchange={changeMode}
           />
+          {#if manualNotice}
+            <p class="inline-warning">{manualNotice}</p>
+          {/if}
           {#if !tunAvailable}
             <p class="inline-warning">
               {tunReason}{#if mode === "tun"}
@@ -515,7 +549,9 @@
         <dt class="setting">
           <span class="setting__label">Mixed port</span>
           <span class="setting__hint">
-            HTTP and SOCKS5 share this loopback port. Applies to the next session.
+            {sessionLocked
+              ? `Live session port: ${liveMixedPort ?? "unavailable"}. Disconnect to change it.`
+              : "HTTP and SOCKS5 share this loopback port. Applies to the next session."}
           </span>
         </dt>
         <dd class="setting__control">
@@ -524,6 +560,7 @@
             type="text"
             inputmode="numeric"
             autocomplete="off"
+            disabled={sessionLocked}
             bind:value={mixedPort}
             onchange={() => commitPort("mixedPort")}
             onkeydown={(event) => {
@@ -777,7 +814,9 @@
         <dt class="setting">
           <span class="setting__label">API port</span>
           <span class="setting__hint">
-            Local Clash API used for stats, connections, and outbound switching.
+            {sessionLocked
+              ? "Locked for the live session; disconnect to change it."
+              : "Local Clash API used for stats, connections, and outbound switching."}
           </span>
         </dt>
         <dd class="setting__control">
@@ -786,6 +825,7 @@
             type="text"
             inputmode="numeric"
             autocomplete="off"
+            disabled={sessionLocked}
             bind:value={apiPort}
             onchange={() => commitPort("apiPort")}
             onkeydown={(event) => {

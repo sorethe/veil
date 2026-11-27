@@ -253,12 +253,12 @@ debugging, add a redacted diagnostic instead of disabling redaction.
 
 ### Engine and Clash API
 
-`runtime/runtime.json` stores the running engine's pid, mode, profile, API port
-and secret (mode `0600`):
+`runtime/runtime.json` stores the running engine's pid, mode, profile, mixed
+port, API port and secret (mode `0600`):
 
 ```bash
 RT=~/.local/share/veil/runtime/runtime.json
-jq '{pid,mode,profileId,apiPort}' "$RT"
+jq '{pid,mode,profileId,mixedPort,apiPort}' "$RT"
 ps -p "$(jq -r .pid "$RT")" -o pid,ppid,args
 curl -s -H "Authorization: Bearer $(jq -r .secret "$RT")" \
   "http://127.0.0.1:$(jq -r .apiPort "$RT")/version"

@@ -90,6 +90,7 @@ version string.
 type EngineState = {
   status: 'idle' | 'starting' | 'connected' | 'stopping' | 'error'
   mode: 'system' | 'tun' | null
+  mixedPort: number | null       // port for this session; set at start, null when idle/error
   profileId: number | null
   profileName: string | null
   startedAt: number | null        // epoch seconds
@@ -234,7 +235,7 @@ type TunSetup = {
   canInstall: boolean        // helperFound && pkexecAvailable && missing helper/policy, no conflicts
   tunAddress: string         // configured IPv4 CIDR checked by the preflight
   tunAddress6: string        // configured IPv6 CIDR checked by the preflight
-  conflictingInterfaces: string[] // other active TUN interfaces (ARPHRD_NONE, not operstate down)
+  conflictingInterfaces: string[] // other active TUN/VPN interfaces (ARPHRD_NONE, operstate not down)
   conflictingRoutes: string[] // existing routes overlapping the proposed CIDRs, e.g. "172.19.0.0/24 dev throne-tun"
   conflictingAddresses: string[] // proposed host addresses already assigned elsewhere, e.g. "172.19.0.1/30 on Meta"
   missing: string[]          // human-readable labels for each conflict or unmet requirement
@@ -243,10 +244,13 @@ type TunSetup = {
 ```
 
 `conflictingInterfaces` lists every interface under `/sys/class/net` whose type is
-`65534` (`ARPHRD_NONE`, TUN), whose name is not `veil0`, and whose `operstate` is
-not `down`. Two TUN interfaces cannot share interface routes or DNS, so a
-non-empty list makes `ready` false and `canInstall` false, and the conflict is
-the first entry in `missing`. Installing the helper cannot resolve it: the UI
+`65534` (`ARPHRD_NONE`), whose name is not `veil0` or `lo`, and whose
+`operstate` is not `down`. Broad detection is intentional: WireGuard and other
+VPN-style interfaces can use the same ARPHRD and own routes/DNS. The kernel
+`tun_flags` attribute is extra evidence when present but is not required, and
+the UI copy says "TUN/VPN interface". Two such interfaces cannot share routes or
+DNS, so a non-empty list makes `ready` false and `canInstall` false, and the
+conflict is the first entry in `missing`. Installing the helper cannot resolve it: the UI
 must tell the user to disable or stop the other tunnel (or use `system` mode)
 and offer a retry plus Diagnostics instead of an install action.
 
@@ -255,7 +259,8 @@ fallback) and `ip -j addr` without changing anything. Every route destination
 that overlaps `tunAddress` or `tunAddress6` is reported in `conflictingRoutes`
 as `"<cidr> dev <interface>"`; a proposed host address already assigned to an
 interface other than `veil0` is reported in `conflictingAddresses` as
-`"<cidr> on <interface>"`. Each conflict appears in `missing` with the
+`"<cidr> on <interface>"`. Routes with `dev veil0` are excluded so a live or
+stale Veil interface does not conflict with itself. Each conflict appears in `missing` with the
 overlapping route/address named, makes `ready` and `canInstall` false, and is
 explained in `detail`. `detail` states that no routes were changed and that
 Veil will not modify other interfaces' routes, addresses, DNS, or firewall
@@ -330,6 +335,12 @@ Rules:
 
 - `engine://state` is the only authority on engine state (see lifecycle above).
   `connect` resolves `connected` only after a real Clash API health check.
+  `mixedPort` is set when a session starts and retained while connected; it is
+  the mixed-inbound port for that session and is `null` when idle or in error.
+  It is persisted in `runtime/runtime.json` for adoption. Older runtime files
+  without it recover `veil-mixed.listen_port` from the persisted runtime config
+  when possible; otherwise the UI shows the connected port as unavailable
+  instead of falling back to a possibly different saved setting.
 - `connect` with `mode: 'tun'` (or the persisted `settings.mode` when `mode` is
   omitted) first runs the same read-only preflight as `get_tun_setup`, using
   `settings.tunAddress` and `settings.tunAddress6`. If `ready` is false it
@@ -350,6 +361,13 @@ Rules:
   `detail` is user-facing explanatory text. In TUN mode `kind` is `tun` and the
   system proxy is untouched. On Hyprland/sway/unknown desktops `kind` is
   `unsupported` and `detail` contains manual environment-variable instructions.
+  When a system-mode session is connected with `proxy.kind === "unsupported"`,
+  `proxy.kind === "error"`, `proxy === null`, or the platform reports no
+  system-proxy support, the UI presents it as `LIVE · MANUAL`, shows the live
+  `mixedPort` and an expanded HTTP/SOCKS environment block, and must not imply
+  traffic is failing merely because no app has used the manual proxy yet. The
+  banner distinguishes an unsupported desktop, a failed desktop-proxy apply, and
+  an adopted/unknown proxy state; it never claims automatic app coverage.
 - Logs are capped at 2000 entries with monotonically increasing `seq`; use
   `get_logs(sinceSeq)` for incremental UI updates. Secrets, passwords, tokens,
   subscription query strings and URL userinfo are redacted server-side.

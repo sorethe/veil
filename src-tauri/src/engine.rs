@@ -31,6 +31,11 @@ use tokio::task::JoinHandle;
 pub struct EngineState {
     pub status: String,
     pub mode: Option<String>,
+    /// Port for this session's mixed inbound, set when a session starts and
+    /// kept while connected. None when idle or in error. Old serialized states
+    /// without the field also deserialize.
+    #[serde(default)]
+    pub mixed_port: Option<u16>,
     pub profile_id: Option<i64>,
     pub profile_name: Option<String>,
     pub started_at: Option<i64>,
@@ -45,6 +50,7 @@ impl Default for EngineState {
         Self {
             status: "idle".into(),
             mode: None,
+            mixed_port: None,
             profile_id: None,
             profile_name: None,
             started_at: None,
@@ -88,6 +94,9 @@ pub struct RuntimeFile {
     pub mode: String,
     pub profile_id: i64,
     pub started_at: i64,
+    /// Old runtime files predate this field; 0 is treated as unknown.
+    #[serde(default)]
+    pub mixed_port: u16,
     pub api_port: u16,
     pub secret: String,
     pub config_path: String,
@@ -394,6 +403,23 @@ impl Engine {
         serde_json::from_str(&raw).ok()
     }
 
+    /// Old runtime files have no mixedPort. Recover it from the persisted
+    /// generated config when possible; otherwise adoption reports unavailable.
+    fn mixed_port_from_config(path: &Path) -> Option<u16> {
+        let raw = fs::read_to_string(path).ok()?;
+        let value: Value = serde_json::from_str(&raw).ok()?;
+        value
+            .get("inbounds")?
+            .as_array()?
+            .iter()
+            .find(|inbound| {
+                inbound.get("tag").and_then(Value::as_str) == Some(crate::configgen::MIXED_TAG)
+            })
+            .and_then(|inbound| inbound.get("listen_port"))
+            .and_then(Value::as_u64)
+            .and_then(|port| u16::try_from(port).ok())
+    }
+
     fn remove_runtime_file(&self) {
         let _ = fs::remove_file(paths::runtime_file_path());
         let _ = fs::remove_file(paths::runtime_config_path());
@@ -446,7 +472,8 @@ impl Engine {
         })?;
         let pid_file = paths::helper_pid_file();
         let log_file = paths::helper_log_path();
-        let output = tokio::process::Command::new(pkexec)
+        let mut command = tokio::process::Command::new(pkexec);
+        command
             .arg(&helper)
             .arg("start")
             .arg("--config")
@@ -456,9 +483,14 @@ impl Engine {
             .arg("--pid-file")
             .arg(&pid_file)
             .arg("--log-file")
-            .arg(&log_file)
-            .output()
+            .arg(&log_file);
+        command.kill_on_drop(true);
+        let output = tokio::time::timeout(Duration::from_secs(120), command.output())
             .await
+            .map_err(|_| {
+                "pkexec authentication timed out after 120s; administrative permission was not granted"
+                    .to_string()
+            })?
             .map_err(|e| format!("run pkexec: {e}"))?;
         let response = parse_helper_response(&output, "start")?;
         let pid = response
@@ -480,13 +512,19 @@ impl Engine {
         if !Path::new(&paths::helper_pid_file()).exists() {
             return Ok(());
         }
-        let output = tokio::process::Command::new(pkexec)
+        let mut command = tokio::process::Command::new(pkexec);
+        command
             .arg(&helper)
             .arg("stop")
             .arg("--pid-file")
-            .arg(paths::helper_pid_file())
-            .output()
+            .arg(paths::helper_pid_file());
+        command.kill_on_drop(true);
+        let output = tokio::time::timeout(Duration::from_secs(120), command.output())
             .await
+            .map_err(|_| {
+                "pkexec authentication timed out after 120s; administrative permission was not granted"
+                    .to_string()
+            })?
             .map_err(|e| format!("run pkexec: {e}"))?;
         parse_helper_response(&output, "stop")?;
         Ok(())
@@ -621,6 +659,7 @@ impl Engine {
             state.status = "error".into();
             state.pid = None;
             state.started_at = None;
+            state.mixed_port = None;
             state.error = Some(message.clone());
             state.proxy = None;
         });
@@ -934,6 +973,7 @@ impl Engine {
         self.set_state(EngineState {
             status: "starting".into(),
             mode: Some(mode.clone()),
+            mixed_port: Some(settings.mixed_port),
             profile_id: Some(profile.id),
             profile_name: Some(profile.name.clone()),
             started_at: Some(started_at),
@@ -965,6 +1005,7 @@ impl Engine {
                 self.set_state(EngineState {
                     status: "error".into(),
                     mode: Some(mode.clone()),
+                    mixed_port: None,
                     profile_id: Some(profile.id),
                     profile_name: Some(profile.name.clone()),
                     started_at: None,
@@ -1003,6 +1044,7 @@ impl Engine {
             self.set_state(EngineState {
                 status: "error".into(),
                 mode: Some(mode),
+                mixed_port: None,
                 profile_id: Some(profile.id),
                 profile_name: Some(profile.name.clone()),
                 started_at: if still_running {
@@ -1054,6 +1096,7 @@ impl Engine {
             mode: mode.clone(),
             profile_id: profile.id,
             started_at,
+            mixed_port: settings.mixed_port,
             api_port: generated.api_port,
             secret: generated.secret.clone(),
             config_path: config_path.to_string_lossy().into_owned(),
@@ -1080,6 +1123,7 @@ impl Engine {
         let state = self.set_state(EngineState {
             status: "connected".into(),
             mode: Some(mode.clone()),
+            mixed_port: Some(settings.mixed_port),
             profile_id: Some(profile.id),
             profile_name: Some(profile.name.clone()),
             started_at: Some(started_at),
@@ -1131,6 +1175,7 @@ impl Engine {
         }
         self.update_state(|state| {
             state.status = "stopping".into();
+            state.mixed_port = None;
             state.error = None;
         });
         self.logs.push("info", "engine", "stopping sing-box");
@@ -1152,6 +1197,7 @@ impl Engine {
                     state.status = "idle".into();
                     state.pid = None;
                     state.started_at = None;
+                    state.mixed_port = None;
                     state.error = None;
                     state.proxy = None;
                 });
@@ -1166,6 +1212,7 @@ impl Engine {
                 self.logs.push("error", "engine", message.clone());
                 self.update_state(|state| {
                     state.status = "error".into();
+                    state.mixed_port = None;
                     state.error = Some(message.clone());
                     state.proxy = None;
                 });
@@ -1457,9 +1504,15 @@ impl Engine {
             self.resource_dir.as_deref(),
         )
         .version;
+        let mixed_port = if runtime.mixed_port != 0 {
+            Some(runtime.mixed_port)
+        } else {
+            Self::mixed_port_from_config(Path::new(&runtime.config_path))
+        };
         let state = self.set_state(EngineState {
             status: "connected".into(),
             mode: Some(runtime.mode.clone()),
+            mixed_port,
             profile_id: Some(runtime.profile_id),
             profile_name: profile.map(|p| p.name),
             started_at: Some(runtime.started_at),
@@ -1484,5 +1537,62 @@ impl Engine {
         self.start_live_tasks(client, runtime.started_at);
         self.register_task(self.spawn_monitor(runtime.pid));
         let _ = state;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn old_runtime_file_without_mixed_port_is_accepted() {
+        let raw = r#"{
+            "pid": 123,
+            "mode": "system",
+            "profileId": 2,
+            "startedAt": 100,
+            "apiPort": 19090,
+            "secret": "redacted",
+            "configPath": "/tmp/config.json",
+            "pidFile": null,
+            "logFile": null
+        }"#;
+        let runtime: RuntimeFile = serde_json::from_str(raw).unwrap();
+        assert_eq!(runtime.mixed_port, 0);
+        assert_eq!(runtime.api_port, 19090);
+    }
+
+    #[test]
+    fn adoption_recovers_mixed_port_from_runtime_config() {
+        let dir = std::env::temp_dir().join(format!("veil-runtime-port-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.json");
+        fs::write(
+            &path,
+            r#"{"inbounds":[{"type":"mixed","tag":"veil-mixed","listen":"127.0.0.1","listen_port":17890}]}"#,
+        )
+        .unwrap();
+        assert_eq!(Engine::mixed_port_from_config(&path), Some(17890));
+
+        fs::write(&path, r#"{"inbounds":[]}"#).unwrap();
+        assert_eq!(Engine::mixed_port_from_config(&path), None);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn old_engine_state_without_mixed_port_deserializes_to_none() {
+        let raw = r#"{
+            "status": "connected",
+            "mode": "system",
+            "profileId": 2,
+            "profileName": "test",
+            "startedAt": 100,
+            "pid": 123,
+            "error": null,
+            "proxy": null,
+            "coreVersion": "1.14.5"
+        }"#;
+        let state: EngineState = serde_json::from_str(raw).unwrap();
+        assert_eq!(state.mixed_port, None);
     }
 }

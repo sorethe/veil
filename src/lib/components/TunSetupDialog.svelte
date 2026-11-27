@@ -59,9 +59,9 @@
       const many = value.conflictingInterfaces.length > 1;
       rows.push({
         key: "conflict",
-        label: "Other TUN interface",
+        label: "Other TUN/VPN interface",
         ok: false,
-        detail: `${names} ${many ? "are" : "is"} active; TUN interfaces cannot share interface routes or DNS`,
+        detail: `${names} ${many ? "are" : "is"} active; TUN/VPN interfaces cannot share interface routes or DNS`,
       });
     }
     for (const route of value.conflictingRoutes) {
@@ -127,7 +127,7 @@
       value.conflictingRoutes.length ||
       value.conflictingAddresses.length
     ) {
-      return "Another tunnel already owns routes, addresses, or TUN interfaces that overlap the proposed Veil TUN addresses. Veil will not modify them; TUN stays blocked until the conflict is resolved. Change the TUN addresses in Settings or disable the other tunnel.";
+      return "Another tunnel already owns routes, addresses, or TUN/VPN interfaces that overlap the proposed Veil TUN addresses. Veil will not modify them; TUN stays blocked until the conflict is resolved. Change the TUN addresses in Settings or disable the other tunnel.";
     }
     if (value.helperInstalled && value.policyInstalled) {
       return "The helper and policy are installed, but TUN still has unmet prerequisites. Veil does not install system packages for you.";
@@ -276,8 +276,8 @@
             {#if setup.conflictingInterfaces.length}
               <p class="banner__body">
                 {setup.conflictingInterfaces.join(", ")}
-                {setup.conflictingInterfaces.length === 1 ? "is" : "are"} already using TUN. Two TUN interfaces
-                cannot share interface routes or DNS.
+                {setup.conflictingInterfaces.length === 1 ? "is" : "are"} already using TUN/VPN. Two TUN/VPN
+                interfaces cannot share interface routes or DNS.
               </p>
             {/if}
             {#if setup.conflictingRoutes.length}

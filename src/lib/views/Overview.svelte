@@ -48,6 +48,26 @@
   const engineReady = $derived(app.clashApiReady);
   const tunAvailable = $derived(app.tunReady);
   const systemProxySupported = $derived(app.platform?.systemProxySupported === true);
+  const manualSession = $derived(app.manualSession);
+  const manualCopy = $derived.by(() => {
+    switch (app.manualSessionReason) {
+      case "apply-error":
+        return {
+          title: "Desktop proxy not applied",
+          body: "Veil could not apply this desktop's proxy settings. The session is manual-only; apps must be pointed at the manual proxy below. Automatic coverage is not active.",
+        };
+      case "unknown":
+        return {
+          title: "Manual proxy state unknown",
+          body: "Veil adopted this system-mode session without a known desktop-proxy result. Treat it as manual-only; apps must use the manual proxy below. Automatic coverage is not confirmed.",
+        };
+      default:
+        return {
+          title: "Manual proxy session",
+          body: "This desktop has no desktop-wide proxy API. Veil is live, but apps do not use it automatically; connections and traffic stay at zero until an app is pointed at the manual proxy.",
+        };
+    }
+  });
   const modeReady = $derived(mode !== "tun" || tunAvailable);
   const tunHint = $derived(
     capabilities === null
@@ -112,10 +132,12 @@
               ? "Reconnect"
               : "Connect",
   );
-  const stateWord = $derived(statusWord(app.engine.status));
+  const stateWord = $derived(manualSession ? "LIVE · MANUAL" : statusWord(app.engine.status));
   const activeMode = $derived(app.engine.mode ?? mode);
 
-  const mixedPort = $derived(app.settings?.mixedPort ?? null);
+  const mixedPort = $derived(
+    app.engine.mixedPort ?? (app.connected ? null : (app.settings?.mixedPort ?? null)),
+  );
   const proxyAddress = $derived(mixedPort === null ? "Unavailable" : `127.0.0.1:${mixedPort}`);
   const envBlock = $derived(
     mixedPort === null
@@ -453,6 +475,40 @@
     </div>
   {/if}
 
+  {#if manualSession}
+    <div class="banner banner--accent manual-session" role="status">
+      <Icon name="info" size={16} />
+      <div class="grow">
+        <p class="banner__title">{manualCopy.title}</p>
+        <p class="banner__body">{manualCopy.body}</p>
+        <div class="manual-session__row">
+          <span class="kicker">Proxy</span>
+          <span class="mono break">{proxyAddress}</span>
+          <button
+            type="button"
+            class="btn btn--sm btn--quiet"
+            disabled={mixedPort === null}
+            onclick={() => void copy("Proxy address", proxyAddress)}
+          >
+            <Icon name="copy" size={11} /> Copy address
+          </button>
+        </div>
+        {#if mixedPort === null}
+          <p class="small muted">Proxy port unavailable.</p>
+        {:else}
+          <pre class="code manual-session__code">{envBlock}</pre>
+          <button
+            type="button"
+            class="btn btn--sm btn--quiet"
+            onclick={() => void copy("Environment block", envBlock)}
+          >
+            <Icon name="copy" size={11} /> Copy env
+          </button>
+        {/if}
+      </div>
+    </div>
+  {/if}
+
   <div class="overview-grid">
     <aside class="monitor panel" aria-label="Session monitor">
       <header class="monitor__head">
@@ -485,8 +541,10 @@
           <p class="monitor__hint">{modeHint}</p>
           {#if mode === "system" && !systemProxySupported}
             <p class="monitor__warn">
-              This desktop reports no usable system-proxy backend. The session
-              {app.connected ? "is" : "will be"} manual-only; use the proxy below.
+              This desktop reports no usable system-proxy backend.
+              {app.connected
+                ? "This is a manual session; use the proxy shown above."
+                : "A connected session will be manual-only."}
             </p>
           {/if}
           {#if mode === "tun" && !modeReady}
@@ -639,7 +697,7 @@
             {/if}
           </dl>
 
-          {#if developerMode}
+          {#if developerMode || manualSession}
             <div class="monitor__env">
               <div class="monitor__env-head">
                 <span class="kicker">Proxy environment</span>
@@ -1006,6 +1064,22 @@
   .session-error {
     margin-bottom: var(--space-4);
     align-items: center;
+  }
+
+  .manual-session {
+    margin-bottom: var(--space-4);
+  }
+
+  .manual-session__row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+    margin-top: 6px;
+  }
+
+  .manual-session__code {
+    margin-top: 6px;
   }
 
   .session-error .mono {

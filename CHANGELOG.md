@@ -16,11 +16,11 @@ been tagged or published as a binary.
   A setup dialog shows each prerequisite and installs the embedded helper and
   policy through `pkexec` with admin approval; the GUI itself never runs as
   root. TUN connect stays gated until the real setup is ready.
-- Detect other active TUN interfaces (`ARPHRD_NONE`, not `down`, excluding
-  `veil0`) and refuse TUN before starting: two TUN tunnels cannot share
-  interface routes or DNS. The setup dialog names the conflicting interfaces
-  and offers retry/Diagnostics instead of installation; System proxy remains
-  available.
+- Detect other active TUN/VPN interfaces (`ARPHRD_NONE`, not `down`, excluding
+  `veil0` and `lo`) and refuse TUN before starting: two tunnels cannot share
+  interface routes or DNS. The setup dialog names the conflicting
+  interfaces and offers retry/Diagnostics instead of installation; System proxy
+  remains available.
 - Configurable `tunAddress` / `tunAddress6` settings (IPv4 and IPv6 CIDRs,
   defaults `172.19.0.1/30` and `fdfe:dcba:9876::1/126`) feed TUN config
   generation and are validated as real CIDRs before they are saved.
@@ -33,7 +33,22 @@ been tagged or published as a binary.
 
 ### Changed
 
-- Nothing yet.
+- `EngineState` now reports the actual live `mixedPort`; `runtime.json` stores
+  it for adoption. Older runtime files recover it from the persisted
+  `veil-mixed.listen_port` when possible, otherwise the connected port is shown
+  as unavailable. The UI uses the live port for proxy copy blocks and locks
+  mode/port edits during a session, including an error state with a live pid.
+- Connected system-mode sessions with no confirmed desktop proxy (`unsupported`,
+  failed apply, or adopted/unknown) are presented as `LIVE · MANUAL` with a
+  persistent reason-specific banner, proxy address, and HTTP/SOCKS environment
+  block instead of looking like a failed zero-traffic session. This is
+  presentation only; system-wide proxy support is unchanged and Hyprland
+  remains unsupported.
+- TUN preflight ignores `dev veil0` routes/addresses and broadly detects
+  non-down `ARPHRD_NONE` TUN/VPN interfaces (including WireGuard); conflict copy
+  now says "TUN/VPN interface". Throne remains detected.
+- `pkexec` helper start/stop calls now time out after 120s and map to a
+  permission error instead of leaving a session stuck `starting`.
 
 ### Fixed
 

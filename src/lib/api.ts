@@ -24,6 +24,8 @@ export interface ProxyInfo {
 export interface EngineState {
   status: EngineStatus;
   mode: Mode | null;
+  /** Port actually bound for this session; null when not connected. */
+  mixedPort: number | null;
   profileId: ProfileId | null;
   profileName: string | null;
   startedAt: number | null;
@@ -256,7 +258,7 @@ export interface TunSetup {
   /** Addresses the read-only preflight checked, copied from settings. */
   tunAddress: string;
   tunAddress6: string;
-  /** Other active TUN interfaces whose routes and DNS would collide with Veil. */
+  /** Other active TUN/VPN interfaces whose routes and DNS would collide with Veil. */
   conflictingInterfaces: string[];
   /** Existing routes that overlap the proposed TUN CIDRs, e.g. "172.19.0.0/24 dev throne-tun". */
   conflictingRoutes: string[];

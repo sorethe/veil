@@ -77,7 +77,7 @@ pub struct TunSetup {
     /// Configured addresses the preflight checked, copied from settings.
     pub tun_address: String,
     pub tun_address6: String,
-    /// Other active TUN interfaces (ARPHRD_NONE, operstate not down) that
+    /// Other active TUN/VPN interfaces (ARPHRD_NONE, operstate not down) that
     /// would collide with Veil's interface routes and DNS.
     pub conflicting_interfaces: Vec<String>,
     /// Read-only route conflicts, formatted as "<cidr> dev <interface>".
@@ -266,7 +266,7 @@ fn tun_setup_from_parts(parts: SetupParts) -> TunSetup {
     let mut missing = Vec::new();
     if interface_conflict {
         missing.push(format!(
-            "Another TUN interface is active: {}; disable it before using Veil TUN",
+            "Another TUN/VPN interface is active: {}; disable it before using Veil TUN",
             conflicting_interfaces.join(", ")
         ));
     }
@@ -295,7 +295,7 @@ fn tun_setup_from_parts(parts: SetupParts) -> TunSetup {
     } else if conflict {
         let mut detail = if interface_conflict {
             format!(
-                "Another TUN interface is active ({}). Two TUN interfaces cannot share interface routes or DNS, so Veil will not start TUN until the other tunnel is disabled. Stop the other tunnel and check again, or use System proxy.",
+                "Another TUN/VPN interface is active ({}). Two TUN/VPN interfaces cannot share interface routes or DNS, so Veil will not start TUN until the other tunnel is disabled. Stop the other tunnel and check again, or use System proxy.",
                 conflicting_interfaces.join(", ")
             )
         } else {
@@ -352,11 +352,25 @@ fn tun_setup_from_parts(parts: SetupParts) -> TunSetup {
     }
 }
 
-/// TUN interfaces besides Veil's own that are currently not down. Two TUN
-/// interfaces cannot coexist because each installs interface routes and a DNS
-/// hijack; detecting the conflict up front avoids routing loops.
-fn conflicting_tun_interfaces() -> Vec<String> {
+/// Any non-down ARPHRD_NONE interface can own routes/DNS like a TUN. The
+/// kernel `tun_flags` attribute is extra evidence when present, but is not
+/// required: WireGuard and other VPN-style interfaces can use the same ARPHRD.
+fn is_active_arp_hrd_none(path: &Path) -> bool {
     const ARPHRD_NONE: &str = "65534";
+    let is_arp_hrd_none = fs::read_to_string(path.join("type"))
+        .map(|value| value.trim() == ARPHRD_NONE)
+        .unwrap_or(false);
+    if !is_arp_hrd_none {
+        return false;
+    }
+    let operstate = fs::read_to_string(path.join("operstate")).unwrap_or_default();
+    operstate.trim() != "down"
+}
+
+/// TUN/VPN interfaces besides Veil's own that are currently not down. These
+/// cannot coexist because each installs interface routes and a DNS hijack;
+/// detecting the conflict up front avoids routing loops.
+fn conflicting_tun_interfaces() -> Vec<String> {
     const OWN_INTERFACE: &str = "veil0";
     let mut names = Vec::new();
     let Ok(entries) = fs::read_dir("/sys/class/net") else {
@@ -367,15 +381,7 @@ fn conflicting_tun_interfaces() -> Vec<String> {
         if name == OWN_INTERFACE || name == "lo" {
             continue;
         }
-        let path = entry.path();
-        let is_tun = fs::read_to_string(path.join("type"))
-            .map(|value| value.trim() == ARPHRD_NONE)
-            .unwrap_or(false);
-        if !is_tun {
-            continue;
-        }
-        let operstate = fs::read_to_string(path.join("operstate")).unwrap_or_default();
-        if operstate.trim() == "down" {
+        if !is_active_arp_hrd_none(&entry.path()) {
             continue;
         }
         names.push(name);
@@ -441,6 +447,9 @@ pub fn route_conflicts(routes: &[RouteSpec], proposed: &[Cidr]) -> Vec<String> {
         let Ok(destination) = Cidr::parse(&route.destination) else {
             continue;
         };
+        if route.dev.as_deref() == Some("veil0") {
+            continue;
+        }
         if proposed
             .iter()
             .any(|address| address.overlaps(&destination))
@@ -1011,7 +1020,9 @@ mod tests {
         assert!(!conflict.can_install);
         assert_eq!(conflict.conflicting_interfaces, ["Meta", "throne-tun"]);
         assert_eq!(conflict.missing.len(), 1);
-        assert!(conflict.missing[0].contains("Another TUN interface is active: Meta, throne-tun"));
+        assert!(
+            conflict.missing[0].contains("Another TUN/VPN interface is active: Meta, throne-tun")
+        );
         assert!(conflict.detail.contains("Meta, throne-tun"));
         assert!(conflict
             .detail
@@ -1065,6 +1076,43 @@ mod tests {
                 "fdfe:dcba:9876::/64 dev throne-tun"
             ]
         );
+    }
+
+    #[test]
+    fn route_conflicts_ignore_veil_own_interface() {
+        let routes = [
+            RouteSpec::from_destination("172.19.0.0/30", Some("veil0")).unwrap(),
+            RouteSpec::from_destination("172.19.0.0/24", Some("throne-tun")).unwrap(),
+        ];
+        let proposed = [Cidr::parse("172.19.0.1/30").unwrap()];
+        assert_eq!(
+            route_conflicts(&routes, &proposed),
+            ["172.19.0.0/24 dev throne-tun"]
+        );
+    }
+
+    #[test]
+    fn tun_detection_accepts_arp_hrd_none_without_tun_flags() {
+        let dir =
+            std::env::temp_dir().join(format!("veil-tun-detect-test-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("type"), "65534\n").unwrap();
+        fs::write(dir.join("operstate"), "unknown\n").unwrap();
+        assert!(is_active_arp_hrd_none(&dir));
+        assert!(!dir.join("tun_flags").exists());
+
+        fs::write(dir.join("operstate"), "down\n").unwrap();
+        assert!(!is_active_arp_hrd_none(&dir));
+
+        if Path::new("/sys/class/net/throne-tun").exists() {
+            assert!(
+                conflicting_tun_interfaces()
+                    .iter()
+                    .any(|name| name == "throne-tun"),
+                "the live Throne TUN must still be detected"
+            );
+        }
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

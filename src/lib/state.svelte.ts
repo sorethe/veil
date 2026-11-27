@@ -58,6 +58,7 @@ function emptyEngine(): EngineState {
   return {
     status: "idle",
     mode: null,
+    mixedPort: null,
     profileId: null,
     profileName: null,
     startedAt: null,
@@ -166,6 +167,27 @@ class AppStore {
 
   get connected(): boolean {
     return this.engine.status === "connected";
+  }
+
+  /**
+   * Why a live system-mode session has no confirmed automatic desktop proxy:
+   * unsupported desktop, failed apply, or an adopted session with unknown state.
+   */
+  get manualSessionReason(): "unsupported" | "apply-error" | "unknown" | null {
+    if (!this.connected || this.engine.mode !== "system") return null;
+    if (this.engine.proxy?.kind === "error") return "apply-error";
+    if (
+      this.engine.proxy?.kind === "unsupported" ||
+      this.platform?.systemProxySupported === false
+    ) {
+      return "unsupported";
+    }
+    if (this.engine.proxy === null) return "unknown";
+    return null;
+  }
+
+  get manualSession(): boolean {
+    return this.manualSessionReason !== null;
   }
 
   get busy(): boolean {

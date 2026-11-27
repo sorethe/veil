@@ -295,5 +295,9 @@ mod tests {
         assert_eq!(error.code, ErrorCode::Unsupported);
         let error = CommandError::from_engine("sing-box exited during startup");
         assert_eq!(error.code, ErrorCode::Engine);
+        let error = CommandError::from_engine(
+            "pkexec authentication timed out after 120s; administrative permission was not granted",
+        );
+        assert_eq!(error.code, ErrorCode::Permission);
     }
 }

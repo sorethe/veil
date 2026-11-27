@@ -134,8 +134,8 @@ touched:
 
 ## Runtime persistence and adoption
 
-`runtime/runtime.json` contains `{pid, mode, profileId, startedAt, apiPort,
-secret, configPath, pidFile, logFile}` (0600). On startup the backend:
+`runtime/runtime.json` contains `{pid, mode, profileId, startedAt, mixedPort,
+apiPort, secret, configPath, pidFile, logFile}` (0600). On startup the backend:
 
 1. Reads the file. Verifies the pid is alive and `/proc/<pid>/cmdline` contains
    `sing-box` and the exact config path.

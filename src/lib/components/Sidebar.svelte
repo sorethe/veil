@@ -46,6 +46,13 @@
         ? "core__dot--bad"
         : "core__dot--warn",
   );
+  const sessionLabel = $derived(
+    app.manualSession
+      ? "LIVE · MANUAL"
+      : `${statusWord(app.engine.status)}${
+          app.engine.mode ? ` · ${app.engine.mode === "tun" ? "TUN" : "SYSTEM"}` : ""
+        }`,
+  );
 </script>
 
 <aside class="sidebar" aria-label="Application">
@@ -92,8 +99,7 @@
       </div>
       <p class="profile-block__name" title={profileName}>{profileName}</p>
       <p class="profile-block__state {`st-${app.engine.status}`}">
-        {statusWord(app.engine.status)}{#if app.engine.mode}
-          · {app.engine.mode === "tun" ? "TUN" : "SYSTEM"}{/if}
+        {sessionLabel}
       </p>
     </div>
 
