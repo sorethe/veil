@@ -302,7 +302,7 @@ event names changed.
 | KDE/XFCE proxy backends | IMPLEMENTED, UNVERIFIED on this host |
 | Release app window + embedded assets + engine state + screenshot | MANUALLY-VERIFIED |
 | Real app connect + traffic + graceful disconnect via window close | MANUALLY-VERIFIED |
-| TUN activation / root / polkit authentication | **BLOCKED/UNVERIFIED** by concurrent Throne TUN route; no retry, no fake success |
+| TUN activation / root / polkit authentication | **PASS (2026-11-27)** — real pkexec-approved end-to-end run; see “TUN end-to-end — PASS” |
 | Tray menu interaction and all 8 views | UI present; full interaction left to frontend inspection |
 | Concurrent Throne TUN | Acknowledged in attribution; not stopped/modified; no Veil system-wide routing claimed |
 
@@ -316,7 +316,7 @@ started root sing-box but it failed before an engine pid was recorded:
 `172.19.0.0/24 dev throne-tun` route). No `veil0` device remained afterwards and
 mode was reset to `system`. The conflicting route belonged to the concurrent
 Throne TUN (`172.19.0.0/24 dev throne-tun`), which was left untouched. **TUN
-end-to-end is not verified/usable for Veil here.**
+end-to-end was blocked at that time; superseded by the PASS below.**
 
 ### TUN acceptance check — blocked by concurrent Throne TUN
 
@@ -355,3 +355,66 @@ therefore shows “Helper permission: no” and “Polkit available: no” while
 
 The final integrated commit is recorded in the delivery report; the earlier
 scaffold/typed-contract commits are `e38068e` and `50f1f36`.
+
+## TUN end-to-end — PASS (2026-11-27)
+
+Host: Linux 7.3.5-2-cachyos, sing-box 1.14.5, Veil 0.1.0 release built with
+`pnpm build` + `cargo build --release` from `dfc9be1` plus the two fixes below.
+Throne's TUN was off, its processes (`3927/3928/3938`) were not touched, and
+no other TUN/VPN interface existed. Every root start/stop used
+`pkexec /usr/bin/veil-helper` with the `dev.veil.helper` policy; no fake
+success was reported.
+
+### Fixes verified
+
+1. **Outbound loop.** The generated route now sets
+   `"auto_detect_interface": true`, so sing-box binds its own outbound sockets
+   to `enp0s31f6` instead of letting the `auto_route` table (2022) route proxy
+   dials back into `veil0`. Before this, the engine logged
+   `dial tcp 45.145.40.13:443: i/o timeout`; `ip route get 45.145.40.13`
+   resolved to `via 172.19.0.2 dev veil0 table 2022`, and an unbound socket
+   was stuck `SYN-SENT` from `172.19.0.1`.
+2. **TUN TCP stack.** The TUN inbound now selects `"stack": "gvisor"`. With
+   the default `mixed` stack (system TCP + gvisor UDP), DNS/UDP worked but
+   local TCP never reached the proxy: the kernel-backed listener bound to
+   `172.19.0.1:<port>`, the client socket stayed `SYN-SENT`, and the engine
+   logged no `inbound/tun ... inbound connection`. Using a TUN address outside
+   the excluded LAN ranges did not change it. `gvisor` handles TCP and UDP in
+   userspace and passes both end-to-end.
+
+### Isolated test app (`/tmp/veil-tun-e2e-*`, new binary)
+
+- mode `tun`, connectOnLaunch; root engine pid 29012; `veil0` up with
+  `172.19.0.1/30` and `fdfe:dcba:9876::1/126`.
+- Generated config:
+  `{"route":{"auto_detect_interface":true,"final":"Proxy"}}` and TUN
+  `{"stack":"gvisor","auto_route":true,"strict_route":true,"dns_mode":"hijack"}`.
+- `ip rule`: 9000→2022 for the TUN subnet, 9001 lookup 2022
+  `suppress_prefixlength 0`, 9002 dport 53/main and `iif veil0 goto 9010`,
+  9003 `iif lo` rules, 9010 nop. Table 2022 carries the split public routes
+  via `172.19.0.2 dev veil0`. Unbound `ip route get 195.72.61.241` still
+  entered veil0, while the engine's socket was
+  `192.168.0.181%enp0s31f6:<port> → 195.72.61.241:443`.
+- DNS resolved real addresses (`ifconfig.co` → `104.21.54.91` /
+  `172.67.168.106`).
+- Proxy env unset for the test commands:
+  `curl https://ifconfig.co/json` → `195.72.61.192`, GeoIP country `GB`;
+  `curl https://api.ipify.org?format=json` → `194.87.159.72`. Clash
+  `/connections` chain: `["🇸🇪 Sweden", "Proxy"]`. The selected outbound is
+  Sweden; the node's exit IP geolocates to GB, reported as observed.
+- No dial/TUN timeouts. The only error was a probe to `95.216.195.133:80`
+  reporting `report handshake success: connection refused` (target refused,
+  not a TUN failure).
+- Disconnect via app SIGTERM (`veil-helper stop`): `veil0` removed, `ip rule`
+  back to `local/main/default`, table 2022 empty, 17890/19090 listeners
+  closed, runtime dir empty.
+
+### Normal installed app (normal XDG, new binary)
+
+- Relaunched in TUN mode: app pid 29288, root engine pid 29515, `veil0` up,
+  window on Hyprland workspace 4, Clash API 200.
+- Through TUN: `curl https://ifconfig.co/json` → `195.72.61.192` (`GB`);
+  `api.ipify` → `78.153.136.14`; chain `["🇸🇪 Sweden", "Proxy"]`; engine
+  socket `192.168.0.181%enp0s31f6:50008 → 195.72.61.241:443`.
+- Left connected in TUN mode. `connectOnLaunch` was restored to its previous
+  `false`; the running session stays connected.

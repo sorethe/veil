@@ -171,6 +171,11 @@ pub fn generate(raw: &str, opts: &GenOptions) -> Result<Generated, String> {
                 "interface_name": TUN_INTERFACE,
                 "address": [&opts.tun_address, &opts.tun_address6],
                 "mtu": 9000,
+                // The default "mixed" stack terminates TCP through the system
+                // stack's TUN-address listener; on Linux hosts where that NAT
+                // path drops local TCP flows only DNS/UDP works. gvisor handles
+                // TCP and UDP entirely in userspace and passes both.
+                "stack": "gvisor",
                 "auto_route": true,
                 "strict_route": true,
                 "dns_mode": "hijack",
@@ -181,6 +186,21 @@ pub fn generate(raw: &str, opts: &GenOptions) -> Result<Generated, String> {
             }
             inbounds.push(tun);
         }
+    }
+
+    // Bind sing-box's own outbound sockets to the physical default NIC.
+    // Without it, dials to proxy servers fall into the TUN's auto_route table
+    // and loop back into veil0, so every outbound connection times out.
+    if tun_mode {
+        if let Some(route) = value.get("route") {
+            if !route.is_object() && !route.is_null() {
+                return Err("profile route must be an object".into());
+            }
+        }
+        if !value.get("route").is_some_and(Value::is_object) {
+            value["route"] = json!({});
+        }
+        value["route"]["auto_detect_interface"] = json!(true);
     }
 
     let json = serde_json::to_string_pretty(&value).map_err(|e| e.to_string())?;
@@ -313,6 +333,7 @@ mod tests {
             json!([DEFAULT_TUN_ADDRESS, DEFAULT_TUN_ADDRESS6])
         );
         assert_eq!(tun["mtu"], json!(9000));
+        assert_eq!(tun["stack"], json!("gvisor"));
         assert_eq!(tun["auto_route"], json!(true));
         assert_eq!(tun["strict_route"], json!(true));
         assert_eq!(tun["dns_mode"], json!("hijack"));
@@ -331,6 +352,71 @@ mod tests {
             .find(|i| i["tag"] == TUN_TAG)
             .unwrap();
         assert_eq!(tun["auto_redirect"], json!(true));
+    }
+
+    #[test]
+    fn tun_mode_enables_auto_detect_interface_and_preserves_route() {
+        let opts = GenOptions {
+            mode: "tun".into(),
+            ..GenOptions::default()
+        };
+        let generated = generate(&base_profile(), &opts).unwrap();
+        assert_eq!(
+            generated.value["route"]["auto_detect_interface"],
+            json!(true)
+        );
+        assert_eq!(generated.value["route"]["final"], json!("Proxy"));
+    }
+
+    #[test]
+    fn tun_mode_creates_route_when_profile_has_none() {
+        let raw = json!({
+            "outbounds": [{ "type": "direct", "tag": "direct" }]
+        })
+        .to_string();
+        let opts = GenOptions {
+            mode: "tun".into(),
+            ..GenOptions::default()
+        };
+        let generated = generate(&raw, &opts).unwrap();
+        assert_eq!(
+            generated.value["route"]["auto_detect_interface"],
+            json!(true)
+        );
+    }
+
+    #[test]
+    fn tun_mode_keeps_existing_route_options() {
+        let raw = json!({
+            "outbounds": [{ "type": "direct", "tag": "direct" }],
+            "route": {
+                "final": "direct",
+                "default_mark": 1234,
+                "rules": [{ "action": "route", "outbound": "direct" }]
+            }
+        })
+        .to_string();
+        let opts = GenOptions {
+            mode: "tun".into(),
+            ..GenOptions::default()
+        };
+        let generated = generate(&raw, &opts).unwrap();
+        assert_eq!(
+            generated.value["route"]["auto_detect_interface"],
+            json!(true)
+        );
+        assert_eq!(generated.value["route"]["default_mark"], json!(1234));
+        assert_eq!(generated.value["route"]["final"], json!("direct"));
+        assert!(generated.value["route"]["rules"].is_array());
+    }
+
+    #[test]
+    fn system_mode_leaves_route_untouched() {
+        let generated = generate(&base_profile(), &GenOptions::default()).unwrap();
+        assert!(generated.value["route"]
+            .get("auto_detect_interface")
+            .is_none());
+        assert_eq!(generated.value["route"]["final"], json!("Proxy"));
     }
 
     #[test]

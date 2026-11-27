@@ -52,7 +52,13 @@ been tagged or published as a binary.
 
 ### Fixed
 
-- Nothing yet.
+- TUN mode now sets `route.auto_detect_interface` in the generated config, so
+  sing-box binds its own outbound sockets to the physical NIC. Previously the
+  default `false` let dials to proxy servers enter the `auto_route` table and
+  loop back into `veil0`, timing out every outbound connection and delay test.
+- TUN mode selects the `gvisor` TCP/IP stack. The default `mixed` stack's
+  kernel-backed TCP NAT left only DNS/UDP working (TCP SYNs never reached the
+  proxy); `gvisor` passes TCP and UDP end-to-end.
 
 ## [0.1.0] - 2026-11-27
 
