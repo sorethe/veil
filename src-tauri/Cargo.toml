@@ -37,7 +37,7 @@ thiserror = "1"
 regex = "1"
 libc = "0.2"
 notify-rust = "4"
-ksni = "0.2"
+ksni = "0.3"
 futures-util = "0.3"
 percent-encoding = "2"
 
