@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Veil
+GenericName=Proxy Client
+Comment=A Linux desktop proxy client powered by sing-box
+Exec=veil
+Icon=veil
+Terminal=false
+Categories=Network;Utility;Security;
+Keywords=proxy;vpn;sing-box;tunnel;
+StartupNotify=true
+StartupWMClass=veil

@@ -1,0 +1,34 @@
+# Maintainer: Veil
+# Build from a release tarball that unpacks to veil-$pkgver/.
+pkgname=veil
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Linux desktop proxy client powered by sing-box"
+arch=('x86_64')
+url="https://veil.dev"
+license=('MIT')
+depends=('webkit2gtk-4.1' 'gtk3' 'libsoup3' 'nftables' 'polkit' 'zbar')
+makedepends=('rust' 'cargo' 'nodejs' 'pnpm')
+optdepends=('sing-box: system-wide core instead of the bundled binary')
+source=("$pkgname-$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cd "$srcdir/$pkgname-$pkgver"
+  pnpm install --frozen-lockfile
+  pnpm build
+  export PATH="$HOME/.cargo/bin:$PATH"
+  ( cd src-tauri && cargo build --release --locked )
+  cargo build --release --locked --manifest-path src-tauri/helper/Cargo.toml
+}
+
+package() {
+  cd "$srcdir/$pkgname-$pkgver"
+  install -Dm755 src-tauri/target/release/veil "$pkgdir/usr/bin/veil"
+  install -Dm755 src-tauri/helper/target/release/veil-helper "$pkgdir/usr/bin/veil-helper"
+  install -Dm644 src-tauri/resources/dev.veil.helper.policy \
+    "$pkgdir/usr/share/polkit-1/actions/dev.veil.helper.policy"
+  install -Dm644 src-tauri/resources/veil.desktop "$pkgdir/usr/share/applications/veil.desktop"
+  install -Dm644 src-tauri/icons/icon.png "$pkgdir/usr/share/icons/hicolor/512x512/apps/veil.png"
+  install -Dm755 src-tauri/resources/sing-box "$pkgdir/usr/lib/veil/sing-box" 2>/dev/null || true
+}
