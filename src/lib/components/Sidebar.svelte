@@ -8,7 +8,7 @@
 
   const nav: { id: View; label: string; icon: IconName; tag?: string }[] = [
     { id: "overview", label: "Overview", icon: "overview" },
-    { id: "membrane", label: "Membrane", icon: "membrane", tag: "lab" },
+    { id: "membrane", label: "Visualizations", icon: "membrane", tag: "lab" },
     { id: "profiles", label: "Profiles", icon: "profiles" },
     { id: "routing", label: "Routing", icon: "routing" },
     { id: "outbounds", label: "Outbounds", icon: "outbounds" },

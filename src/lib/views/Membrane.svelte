@@ -1,10 +1,14 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import { api, type Conn, type Outbound } from "../api";
   import Icon from "../components/Icon.svelte";
+  import Segmented from "../components/Segmented.svelte";
   import StatusGlyph from "../components/StatusGlyph.svelte";
   import MembraneCanvas from "../components/membrane/Membrane.svelte";
+  import Orbit from "../components/orbit/Orbit.svelte";
+  import PerformanceOverlay from "../components/performance/PerformanceOverlay.svelte";
+  import VisualizationControls from "../components/performance/VisualizationControls.svelte";
   import { buildConstellation } from "../constellation";
   import {
     errorMessage,
@@ -24,10 +28,28 @@
     type MembraneUnresolvedEndpoint,
   } from "../membrane-ip";
   import { outboundStore, type DelayReading } from "../outbounds.svelte";
+  import { readOrbitLocations, writeOrbitLocations, type OrbitLocationMap } from "../orbit";
   import { app } from "../state.svelte";
+  import { performanceStore } from "../performance.svelte";
 
   const POLL_MS = 1800;
   const DESTINATION_CAP = 180;
+  const VIZ_KEY = "veil.viz.mode";
+
+  type VisualizationMode = "membrane" | "orbital";
+
+  function readVisualization(): VisualizationMode {
+    try {
+      return localStorage.getItem(VIZ_KEY) === "orbital" ? "orbital" : "membrane";
+    } catch {
+      return "membrane";
+    }
+  }
+
+  const visualizationOptions = [
+    { value: "membrane", label: "Membrane" },
+    { value: "orbital", label: "Orbital" },
+  ];
 
   interface WorkingLink {
     endpointKey: string;
@@ -57,6 +79,11 @@
   let pageEl = $state<HTMLDivElement | null>(null);
   let pageVisible = $state(!document.hidden);
   let selected = $state<MembraneSelection | null>(null);
+  let visualization = $state<VisualizationMode>(readVisualization());
+  let orbitLocations = $state<OrbitLocationMap>(readOrbitLocations());
+  let locationLat = $state<number | null>(null);
+  let locationLon = $state<number | null>(null);
+  let locationError = $state<string | null>(null);
   let resolvedActiveId = $state<string | null>(null);
   let routeError = $state<string | null>(null);
   let routeKey: string | null = null;
@@ -174,6 +201,17 @@
     Math.max(0, destinationList.length - renderDestinations.length),
   );
 
+  const connectionCounts = $derived.by(() => {
+    void destinationRevision;
+    const counts = new SvelteMap<string, number>();
+    for (const destination of destinations.values()) {
+      for (const link of destination.links) {
+        counts.set(link.endpointKey, (counts.get(link.endpointKey) ?? 0) + link.connectionCount);
+      }
+    }
+    return counts;
+  });
+
   const selectedDestination = $derived.by(() => {
     const current = selected;
     return current?.kind === "destination"
@@ -189,6 +227,17 @@
       unresolved.find((endpoint) => endpoint.key === current.key) ??
       null
     );
+  });
+
+  const selectedLocation = $derived.by(() => {
+    const current = selectedEndpoint;
+    if (!current || !("ip" in current)) return null;
+    return orbitLocations[current.ip] ?? null;
+  });
+
+  const selectedEndpointIp = $derived.by(() => {
+    const current = selectedEndpoint;
+    return current && "ip" in current ? current.ip : null;
   });
 
   const activeProfileName = $derived(
@@ -271,6 +320,43 @@
 
   function selectDestination(key: string): void {
     selected = { kind: "destination", key };
+  }
+
+  function setVisualization(next: string): void {
+    if (next !== "membrane" && next !== "orbital") return;
+    visualization = next;
+    try {
+      localStorage.setItem(VIZ_KEY, next);
+    } catch {
+      /* storage can be unavailable in hardened webviews */
+    }
+  }
+
+  function saveLocation(ip: string): void {
+    const lat = locationLat;
+    const lon = locationLon;
+    if (
+      lat === null ||
+      lon === null ||
+      !Number.isFinite(lat) ||
+      !Number.isFinite(lon) ||
+      lat < -90 ||
+      lat > 90 ||
+      lon < -180 ||
+      lon > 180
+    ) {
+      locationError = "Latitude must be -90 to 90 and longitude -180 to 180.";
+      return;
+    }
+    orbitLocations = writeOrbitLocations({ ...orbitLocations, [ip]: { lat, lon } });
+    locationError = null;
+  }
+
+  function clearLocation(ip: string): void {
+    const next = { ...orbitLocations };
+    delete next[ip];
+    orbitLocations = writeOrbitLocations(next);
+    locationError = null;
   }
 
   function tagKey(tag: string): string {
@@ -524,6 +610,14 @@
   });
 
   $effect(() => {
+    const ip = selectedEndpointIp;
+    const location = selectedLocation;
+    locationError = null;
+    locationLat = ip ? (location?.lat ?? null) : null;
+    locationLon = ip ? (location?.lon ?? null) : null;
+  });
+
+  $effect(() => {
     const key = `${app.engine.status}:${app.engine.startedAt ?? ""}`;
     if (!app.connected) {
       resolvedActiveId = null;
@@ -549,6 +643,10 @@
     })();
   });
 
+  onMount(() => {
+    performanceStore.ensureDisplayEstimate();
+  });
+
   onDestroy(() => {
     destinations.clear();
     unresolvedTags.clear();
@@ -559,29 +657,60 @@
   <header class="membrane-head">
     <div class="membrane-head__text">
       <span class="kicker">Live feature</span>
-      <h1 class="page-title">Network membrane</h1>
+      <h1 class="page-title">
+        {visualization === "orbital" ? "Orbital view" : "Network membrane"}
+      </h1>
       <p class="page-desc">
-        Literal server IPs form the outer endpoint shell; observed connections place destinations on
-        an inner layer. Edges are logical, not physical hops.
+        {#if visualization === "orbital"}
+          Literal endpoint IPs orbit a real Earth; arcs are logical links from the local YOU
+          station, not physical routes. Manual coordinates are user-supplied approximations and stay
+          local.
+        {:else}
+          Literal server IPs form the outer endpoint shell; observed connections place destinations
+          on an inner layer. Edges are logical, not physical hops.
+        {/if}
       </p>
     </div>
     <div class="membrane-head__meta">
+      <Segmented
+        value={visualization}
+        options={visualizationOptions}
+        onchange={setVisualization}
+        label="Visualization mode"
+      />
       <span class="tag tag--accent">{pollLabel}</span>
       <span class="tag mono">{model.source}</span>
     </div>
   </header>
 
   <div class="membrane-layout">
-    <section class="membrane-stage panel" aria-label="Network membrane canvas">
-      <MembraneCanvas
-        {endpoints}
-        {unresolved}
-        destinations={renderDestinations}
-        {activeEndpointKey}
-        {selected}
-        status={app.engine.status}
-        onselect={(next) => (selected = next)}
-      />
+    <section
+      class="membrane-stage panel"
+      aria-label={visualization === "orbital" ? "Orbital globe canvas" : "Network membrane canvas"}
+    >
+      {#if visualization === "membrane"}
+        <MembraneCanvas
+          {endpoints}
+          {unresolved}
+          destinations={renderDestinations}
+          {activeEndpointKey}
+          {selected}
+          status={app.engine.status}
+          onselect={(next) => (selected = next)}
+        />
+      {:else}
+        <Orbit
+          {endpoints}
+          {unresolved}
+          {activeEndpointKey}
+          {selected}
+          status={app.engine.status}
+          {connectionCounts}
+          locations={orbitLocations}
+          onselect={(next) => (selected = next)}
+        />
+      {/if}
+      <PerformanceOverlay />
     </section>
 
     <aside class="membrane-panel panel" aria-label="Membrane details">
@@ -657,6 +786,11 @@
               })}
             </p>
           {/if}
+        </section>
+
+        <section class="membrane-section" aria-label="Performance">
+          <h2 class="membrane-section__title">Performance</h2>
+          <VisualizationControls />
         </section>
 
         {#if selectedDestination}
@@ -797,6 +931,73 @@
                   </li>
                 {/each}
               </ul>
+              <div class="orbit-location">
+                <div class="membrane-section__head">
+                  <h3 class="membrane-section__title">Orbital location</h3>
+                  {#if selectedLocation}
+                    <span class="tag">manual</span>
+                  {:else}
+                    <span class="tag tag--plain">not configured</span>
+                  {/if}
+                </div>
+                {#if selectedLocation}
+                  <p class="membrane-note">
+                    Approximate, user-supplied location. Stored only in this app; never transmitted.
+                  </p>
+                {:else}
+                  <p class="membrane-note">
+                    Location not configured. The marker uses a deterministic non-geographic orbital
+                    position.
+                  </p>
+                {/if}
+                <div class="orbit-location__fields">
+                  <label class="orbit-location__field">
+                    <span>Latitude</span>
+                    <input
+                      class="input"
+                      type="number"
+                      min="-90"
+                      max="90"
+                      step="0.1"
+                      bind:value={locationLat}
+                      aria-label={`Latitude for ${selectedEndpoint.ip}`}
+                    />
+                  </label>
+                  <label class="orbit-location__field">
+                    <span>Longitude</span>
+                    <input
+                      class="input"
+                      type="number"
+                      min="-180"
+                      max="180"
+                      step="0.1"
+                      bind:value={locationLon}
+                      aria-label={`Longitude for ${selectedEndpoint.ip}`}
+                    />
+                  </label>
+                </div>
+                {#if locationError}
+                  <p class="membrane-note" role="alert">{locationError}</p>
+                {/if}
+                <div class="membrane-actions">
+                  <button
+                    type="button"
+                    class="btn btn--sm"
+                    onclick={() => saveLocation(selectedEndpoint.ip)}
+                  >
+                    Save location
+                  </button>
+                  {#if selectedLocation}
+                    <button
+                      type="button"
+                      class="btn btn--sm btn--quiet"
+                      onclick={() => clearLocation(selectedEndpoint.ip)}
+                    >
+                      Clear
+                    </button>
+                  {/if}
+                </div>
+              </div>
             {:else}
               <dl class="membrane-kv">
                 <div>
@@ -947,31 +1148,60 @@
         <section class="membrane-section" aria-label="Legend">
           <h2 class="membrane-section__title">Legend</h2>
           <ul class="membrane-legend">
-            <li>
-              <span class="legend-swatch legend-swatch--point" aria-hidden="true"></span>
-              <span>Membrane points · decorative background</span>
-            </li>
-            <li>
-              <span class="legend-swatch legend-swatch--center" aria-hidden="true"></span>
-              <span>YOU · local center, not a server</span>
-            </li>
-            <li>
-              <span class="legend-swatch legend-swatch--endpoint" aria-hidden="true"></span>
-              <span>Endpoint · literal server IP, grouped tags</span>
-            </li>
-            <li>
-              <span class="legend-swatch legend-swatch--destination" aria-hidden="true"></span>
-              <span>Destination · observed connection IP</span>
-            </li>
-            <li>
-              <span class="legend-swatch legend-swatch--unresolved" aria-hidden="true"></span>
-              <span>Unresolved endpoint · real outbound tag, no invented IP</span>
-            </li>
-            <li>
-              <span class="legend-swatch legend-swatch--path" aria-hidden="true"></span>
-              <span>Illuminated logical edge · no physical hop data</span>
-            </li>
+            {#if visualization === "orbital"}
+              <li>
+                <span class="legend-swatch legend-swatch--center" aria-hidden="true"></span>
+                <span>YOU station · local latitude 82°, not a city</span>
+              </li>
+              <li>
+                <span class="legend-swatch legend-swatch--endpoint" aria-hidden="true"></span>
+                <span>Endpoint · literal server IP, grouped tags</span>
+              </li>
+              <li>
+                <span class="legend-swatch legend-swatch--manual" aria-hidden="true"></span>
+                <span>Manual location · approximate, user-supplied crosshair</span>
+              </li>
+              <li>
+                <span class="legend-swatch legend-swatch--unresolved" aria-hidden="true"></span>
+                <span>Unresolved endpoint · real tag, no invented IP</span>
+              </li>
+              <li>
+                <span class="legend-swatch legend-swatch--path" aria-hidden="true"></span>
+                <span>Arc from YOU · logical link, not a physical route</span>
+              </li>
+            {:else}
+              <li>
+                <span class="legend-swatch legend-swatch--point" aria-hidden="true"></span>
+                <span>Membrane points · decorative background</span>
+              </li>
+              <li>
+                <span class="legend-swatch legend-swatch--center" aria-hidden="true"></span>
+                <span>YOU · local center, not a server</span>
+              </li>
+              <li>
+                <span class="legend-swatch legend-swatch--endpoint" aria-hidden="true"></span>
+                <span>Endpoint · literal server IP, grouped tags</span>
+              </li>
+              <li>
+                <span class="legend-swatch legend-swatch--destination" aria-hidden="true"></span>
+                <span>Destination · observed connection IP</span>
+              </li>
+              <li>
+                <span class="legend-swatch legend-swatch--unresolved" aria-hidden="true"></span>
+                <span>Unresolved endpoint · real outbound tag, no invented IP</span>
+              </li>
+              <li>
+                <span class="legend-swatch legend-swatch--path" aria-hidden="true"></span>
+                <span>Illuminated logical edge · no physical hop data</span>
+              </li>
+            {/if}
           </ul>
+          {#if visualization === "orbital"}
+            <p class="membrane-note">
+              Positions without a manual override are deterministic non-geographic orbital slots.
+            </p>
+            <p class="membrane-note">Land geometry: Natural Earth 1:110m · public domain.</p>
+          {/if}
           <p class="membrane-legend__count mono">
             {endpoints.length} endpoints · {destinationList.length} destinations · {activeConnections}
             connections
@@ -1278,6 +1508,33 @@
     color: var(--muted);
   }
 
+  .orbit-location {
+    display: grid;
+    gap: var(--space-2);
+    padding-top: var(--space-2);
+    border-top: 1px solid var(--line);
+  }
+
+  .orbit-location__fields {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: var(--space-2);
+  }
+
+  .orbit-location__field {
+    display: grid;
+    gap: 4px;
+    font-family: var(--font-mono);
+    font-size: var(--fs-2xs);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .orbit-location__field .input {
+    width: 100%;
+  }
+
   .membrane-legend {
     display: grid;
     gap: 6px;
@@ -1346,6 +1603,23 @@
     height: 7px;
     border: 1px dashed var(--muted);
     transform: rotate(45deg);
+  }
+
+  .legend-swatch--manual::before,
+  .legend-swatch--manual::after {
+    content: "";
+    position: absolute;
+    background: var(--warning);
+  }
+
+  .legend-swatch--manual::before {
+    width: 9px;
+    height: 1px;
+  }
+
+  .legend-swatch--manual::after {
+    width: 1px;
+    height: 9px;
   }
 
   .legend-swatch--path {

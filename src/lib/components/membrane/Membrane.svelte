@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { untrack } from "svelte";
+  import { onDestroy, untrack } from "svelte";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import type { EngineStatus } from "../../api";
   import { clamp, formatDelay } from "../../format";
+  import { createFramePacer } from "../../performance.svelte";
   import {
     buildMembraneGeometry,
     createCamera,
@@ -118,10 +119,6 @@
   let zoom = 1;
   let animationTime = 0;
   let lastDraw = 0;
-
-  let running = false;
-  let frame = 0;
-  let singleFrame = 0;
   let onScreen = true;
   let reducedMotion = false;
 
@@ -129,6 +126,13 @@
   let moved = false;
   let lastPointerX = 0;
   let lastPointerY = 0;
+
+  const pacer = createFramePacer({
+    onFrame: (now) => draw(now),
+    shouldRun: () => !reducedMotion && onScreen && !document.hidden,
+  });
+
+  onDestroy(() => pacer.dispose());
 
   interface Rgb {
     r: number;
@@ -690,30 +694,19 @@
   }
 
   function startLoop(): void {
-    if (running || !canvas) return;
-    running = true;
-    lastDraw = performance.now();
-    frame = requestAnimationFrame(step);
+    if (!canvas) return;
+    if (!pacer.running) lastDraw = 0;
+    pacer.start();
   }
 
   function stopLoop(): void {
-    running = false;
-    if (frame) cancelAnimationFrame(frame);
-    frame = 0;
-  }
-
-  function step(now: number): void {
-    if (!running) return;
-    draw(now);
-    if (running) frame = requestAnimationFrame(step);
+    pacer.stop();
+    lastDraw = 0;
   }
 
   function scheduleDraw(): void {
-    if (running || singleFrame || !canvas || document.hidden || !onScreen) return;
-    singleFrame = requestAnimationFrame((now) => {
-      singleFrame = 0;
-      if (!running) draw(now);
-    });
+    if (!canvas || document.hidden || !onScreen) return;
+    if (!pacer.running) pacer.requestDraw();
   }
 
   function syncLoop(): void {
@@ -721,7 +714,7 @@
       startLoop();
     } else {
       stopLoop();
-      scheduleDraw();
+      if (onScreen && !document.hidden) pacer.requestDraw();
     }
   }
 
@@ -1107,8 +1100,6 @@
       motionQuery.removeEventListener("change", onMotionChange);
       surface.removeEventListener("wheel", onWheel);
       stopLoop();
-      if (singleFrame) cancelAnimationFrame(singleFrame);
-      singleFrame = 0;
       ctx2d = null;
     };
   });

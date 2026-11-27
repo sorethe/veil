@@ -20,7 +20,7 @@
 
   const titles: Record<View, string> = {
     overview: "Overview",
-    membrane: "Membrane",
+    membrane: "Visualizations",
     profiles: "Profiles",
     routing: "Routing",
     outbounds: "Outbounds",
