@@ -73,6 +73,9 @@ pub struct TunSetup {
     pub tun_device: bool,
     pub nft: bool,
     pub can_install: bool,
+    /// Other active TUN interfaces (ARPHRD_NONE, operstate not down) that
+    /// would collide with Veil's interface routes and DNS.
+    pub conflicting_interfaces: Vec<String>,
     pub missing: Vec<String>,
     pub detail: String,
 }
@@ -174,7 +177,8 @@ fn polkit_policy_installed() -> bool {
         || Path::new("/usr/share/polkit-1/actions/veil-helper.policy").exists()
 }
 
-fn tun_setup_from_parts(
+#[derive(Default)]
+struct SetupParts {
     helper_found: bool,
     helper_path: Option<String>,
     helper_installed: bool,
@@ -182,31 +186,73 @@ fn tun_setup_from_parts(
     pkexec_available: bool,
     tun_device: bool,
     nft: bool,
-) -> TunSetup {
-    let mut missing = Vec::new();
+    conflicting_interfaces: Vec<String>,
+}
+
+fn tun_setup_from_parts(parts: SetupParts) -> TunSetup {
+    let SetupParts {
+        helper_found,
+        helper_path,
+        helper_installed,
+        policy_installed,
+        pkexec_available,
+        tun_device,
+        nft,
+        conflicting_interfaces,
+    } = parts;
+
+    let mut other_missing = Vec::new();
     if !helper_installed {
-        missing.push(if helper_found {
+        other_missing.push(if helper_found {
             "veil-helper is not installed to /usr/bin/veil-helper".to_string()
         } else {
             "veil-helper binary was not found".to_string()
         });
     }
     if !policy_installed {
-        missing.push("polkit policy dev.veil.helper is not installed".to_string());
+        other_missing.push("polkit policy dev.veil.helper is not installed".to_string());
     }
     if !pkexec_available {
-        missing.push("pkexec is not installed".to_string());
+        other_missing.push("pkexec is not installed".to_string());
     }
     if !tun_device {
-        missing.push("/dev/net/tun is missing".to_string());
+        other_missing.push("/dev/net/tun is missing".to_string());
     }
     if !nft {
-        missing.push("nft is not installed".to_string());
+        other_missing.push("nft is not installed".to_string());
     }
-    let ready = helper_installed && policy_installed && pkexec_available && tun_device && nft;
-    let can_install = helper_found && pkexec_available && (!helper_installed || !policy_installed);
+
+    let conflict = !conflicting_interfaces.is_empty();
+    let mut missing = Vec::new();
+    if conflict {
+        missing.push(format!(
+            "Another TUN interface is active: {}; disable it before using Veil TUN",
+            conflicting_interfaces.join(", ")
+        ));
+    }
+    missing.extend(other_missing.iter().cloned());
+
+    let prerequisites_ready =
+        helper_installed && policy_installed && pkexec_available && tun_device && nft;
+    let ready = prerequisites_ready && !conflict;
+    // Installing the helper cannot resolve a route/DNS collision with another
+    // tunnel, so do not offer installation while one is active.
+    let can_install =
+        helper_found && pkexec_available && (!helper_installed || !policy_installed) && !conflict;
     let detail = if ready {
         "TUN setup is ready.".to_string()
+    } else if conflict {
+        let mut detail = format!(
+            "Another TUN interface is active ({}). Two TUN interfaces cannot share interface routes or DNS, so Veil will not start TUN until the other tunnel is disabled. Stop the other tunnel and check again, or use System proxy.",
+            conflicting_interfaces.join(", ")
+        );
+        if !other_missing.is_empty() {
+            detail.push_str(&format!(
+                " Other unmet requirements: {}.",
+                other_missing.join("; ")
+            ));
+        }
+        detail
     } else {
         format!("TUN setup is incomplete: {}", missing.join("; "))
     };
@@ -220,9 +266,42 @@ fn tun_setup_from_parts(
         tun_device,
         nft,
         can_install,
+        conflicting_interfaces,
         missing,
         detail,
     }
+}
+
+/// TUN interfaces besides Veil's own that are currently not down. Two TUN
+/// interfaces cannot coexist because each installs interface routes and a DNS
+/// hijack; detecting the conflict up front avoids routing loops.
+fn conflicting_tun_interfaces() -> Vec<String> {
+    const ARPHRD_NONE: &str = "65534";
+    const OWN_INTERFACE: &str = "veil0";
+    let mut names = Vec::new();
+    let Ok(entries) = fs::read_dir("/sys/class/net") else {
+        return names;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name == OWN_INTERFACE || name == "lo" {
+            continue;
+        }
+        let path = entry.path();
+        let is_tun = fs::read_to_string(path.join("type"))
+            .map(|value| value.trim() == ARPHRD_NONE)
+            .unwrap_or(false);
+        if !is_tun {
+            continue;
+        }
+        let operstate = fs::read_to_string(path.join("operstate")).unwrap_or_default();
+        if operstate.trim() == "down" {
+            continue;
+        }
+        names.push(name);
+    }
+    names.sort();
+    names
 }
 
 /// Probe the real system for TUN prerequisites. Never reports a requirement as
@@ -240,15 +319,16 @@ pub fn tun_setup(resource_dir: Option<&Path>) -> TunSetup {
     let pkexec_available = find_in_path("pkexec").is_some();
     let tun_device = Path::new("/dev/net/tun").exists();
     let nft = find_in_path("nft").is_some();
-    tun_setup_from_parts(
+    tun_setup_from_parts(SetupParts {
         helper_found,
-        helper_path.map(|path| path.to_string_lossy().into_owned()),
+        helper_path: helper_path.map(|path| path.to_string_lossy().into_owned()),
         helper_installed,
         policy_installed,
         pkexec_available,
         tun_device,
         nft,
-    )
+        conflicting_interfaces: conflicting_tun_interfaces(),
+    })
 }
 
 fn run_ip(args: &[&str]) -> Option<Value> {
@@ -564,15 +644,37 @@ mod tests {
         tun_device: bool,
         nft: bool,
     ) -> TunSetup {
-        tun_setup_from_parts(
+        setup_with_conflicts(
             helper_found,
-            helper_found.then(|| "/usr/bin/veil-helper".to_string()),
             helper_installed,
             policy_installed,
             pkexec_available,
             tun_device,
             nft,
+            Vec::new(),
         )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn setup_with_conflicts(
+        helper_found: bool,
+        helper_installed: bool,
+        policy_installed: bool,
+        pkexec_available: bool,
+        tun_device: bool,
+        nft: bool,
+        conflicting_interfaces: Vec<String>,
+    ) -> TunSetup {
+        tun_setup_from_parts(SetupParts {
+            helper_found,
+            helper_path: helper_found.then(|| "/usr/bin/veil-helper".to_string()),
+            helper_installed,
+            policy_installed,
+            pkexec_available,
+            tun_device,
+            nft,
+            conflicting_interfaces,
+        })
     }
 
     #[test]
@@ -623,6 +725,44 @@ mod tests {
     }
 
     #[test]
+    fn tun_setup_rejects_active_conflicting_tun_interfaces() {
+        let conflict = setup_with_conflicts(
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            vec!["Meta".to_string(), "throne-tun".to_string()],
+        );
+        assert!(!conflict.ready);
+        assert!(!conflict.can_install);
+        assert_eq!(conflict.conflicting_interfaces, ["Meta", "throne-tun"]);
+        assert_eq!(conflict.missing.len(), 1);
+        assert!(conflict.missing[0].contains("Another TUN interface is active: Meta, throne-tun"));
+        assert!(conflict.detail.contains("Meta, throne-tun"));
+        assert!(conflict
+            .detail
+            .contains("cannot share interface routes or DNS"));
+
+        // A conflict blocks readiness even when some prerequisites are also
+        // missing, and the conflict label stays first for inline status.
+        let mixed = setup_with_conflicts(
+            true,
+            false,
+            false,
+            true,
+            true,
+            true,
+            vec!["Meta".to_string()],
+        );
+        assert!(!mixed.ready);
+        assert!(!mixed.can_install);
+        assert!(mixed.missing[0].contains("Meta"));
+        assert!(mixed.detail.contains("Other unmet requirements"));
+    }
+
+    #[test]
     fn tun_setup_serializes_contract_fields() {
         let json = serde_json::to_value(setup(true, false, false, true, true, true)).unwrap();
         for key in [
@@ -635,6 +775,7 @@ mod tests {
             "tunDevice",
             "nft",
             "canInstall",
+            "conflictingInterfaces",
             "missing",
             "detail",
         ] {

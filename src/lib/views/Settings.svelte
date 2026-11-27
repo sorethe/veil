@@ -67,9 +67,11 @@
     setupChecking
       ? "checking"
       : tunSetup
-        ? tunSetup.ready
-          ? "ready"
-          : "required"
+        ? tunSetup.conflictingInterfaces.length
+          ? "conflict"
+          : tunSetup.ready
+            ? "ready"
+            : "required"
         : tunSetupError
           ? "unknown"
           : "not checked",

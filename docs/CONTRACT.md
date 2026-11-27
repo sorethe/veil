@@ -229,11 +229,20 @@ type TunSetup = {
   pkexecAvailable: boolean
   tunDevice: boolean         // /dev/net/tun exists
   nft: boolean               // nft executable on PATH
-  canInstall: boolean        // helperFound && pkexecAvailable && missing helper/policy
+  canInstall: boolean        // helperFound && pkexecAvailable && missing helper/policy, no conflicting TUN
+  conflictingInterfaces: string[] // other active TUN interfaces (ARPHRD_NONE, not operstate down)
   missing: string[]          // human-readable labels for each unmet requirement
   detail: string             // summary suitable for display
 }
 ```
+
+`conflictingInterfaces` lists every interface under `/sys/class/net` whose type is
+`65534` (`ARPHRD_NONE`, TUN), whose name is not `veil0`, and whose `operstate` is
+not `down`. Two TUN interfaces cannot share interface routes or DNS, so a
+non-empty list makes `ready` false and `canInstall` false, and the conflict is
+the first entry in `missing`. Installing the helper cannot resolve it: the UI
+must tell the user to disable or stop the other tunnel (or use `system` mode)
+and offer a retry plus Diagnostics instead of an install action.
 
 `get_tun_setup` reports the live TUN prerequisite state; it never mutates
 anything. `install_tun_helper` locates the helper (resources or installed
@@ -305,8 +314,12 @@ Rules:
 - `connect` with `mode: 'tun'` (or the persisted `settings.mode` when `mode` is
   omitted) first checks `get_tun_setup`. If `ready` is false it rejects before
   spawning anything with code `permission`, message `"TUN setup is required"`,
-  and `detail` listing the missing requirements. The UI should offer
-  `install_tun_helper` and then retry. `system` mode is unaffected.
+  and `detail` listing the missing requirements. A non-empty
+  `conflictingInterfaces` always rejects here even when every other
+  prerequisite is met, and its label appears in `detail`. The UI should offer
+  `install_tun_helper` and then retry only when no conflict exists; for a
+  conflict it must instead explain that another TUN owns interface routes/DNS
+  and ask the user to stop it or use `system` mode. `system` mode is unaffected.
 - Stats are only produced by sing-box's Clash API. When idle, `get_stats`
   returns cached zeros and `duration: 0`; nothing is polled when idle.
 - `proxy.kind` values: `gnome`, `kde`, `xfce`, `tun`, `unsupported`, `error`.

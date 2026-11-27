@@ -16,6 +16,11 @@ been tagged or published as a binary.
   A setup dialog shows each prerequisite and installs the embedded helper and
   policy through `pkexec` with admin approval; the GUI itself never runs as
   root. TUN connect stays gated until the real setup is ready.
+- Detect other active TUN interfaces (`ARPHRD_NONE`, not `down`, excluding
+  `veil0`) and refuse TUN before starting: two TUN tunnels cannot share
+  interface routes or DNS. The setup dialog names the conflicting interfaces
+  and offers retry/Diagnostics instead of installation; System proxy remains
+  available.
 
 ### Changed
 

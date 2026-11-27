@@ -249,6 +249,8 @@ export interface TunSetup {
   tunDevice: boolean;
   nft: boolean;
   canInstall: boolean;
+  /** Other active TUN interfaces whose routes and DNS would collide with Veil. */
+  conflictingInterfaces: string[];
   missing: string[];
   detail: string;
 }

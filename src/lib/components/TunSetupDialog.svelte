@@ -45,10 +45,22 @@
           : "Install helper & enable TUN",
   );
   const blockedReason = $derived(setup ? installBlockReason(setup) : null);
+  const hasConflict = $derived((setup?.conflictingInterfaces.length ?? 0) > 0);
 
   function rowsFor(value: TunSetup | null): SetupRow[] {
     if (!value) return [];
-    return [
+    const rows: SetupRow[] = [];
+    if (value.conflictingInterfaces.length) {
+      const names = value.conflictingInterfaces.join(", ");
+      const many = value.conflictingInterfaces.length > 1;
+      rows.push({
+        key: "conflict",
+        label: "Other TUN interface",
+        ok: false,
+        detail: `${names} ${many ? "are" : "is"} active; TUN interfaces cannot share interface routes or DNS`,
+      });
+    }
+    rows.push(
       {
         key: "helper",
         label: "Privileged helper",
@@ -85,10 +97,14 @@
         ok: value.nft,
         detail: value.nft ? "nft is available" : "nft is not installed",
       },
-    ];
+    );
+    return rows;
   }
 
   function installBlockReason(value: TunSetup): string {
+    if (value.conflictingInterfaces.length) {
+      return "Another TUN interface is active. Veil cannot share interface routes or DNS with it; disable the other tunnel before using Veil TUN.";
+    }
     if (value.helperInstalled && value.policyInstalled) {
       return "The helper and policy are installed, but TUN still has unmet prerequisites. Veil does not install system packages for you.";
     }
@@ -222,7 +238,20 @@
         {/each}
       </ul>
 
-      {#if setup.ready}
+      {#if setup.conflictingInterfaces.length}
+        <div class="banner banner--error" role="alert">
+          <Icon name="error" size={15} />
+          <div class="grow">
+            <p class="banner__title">Another TUN interface is active</p>
+            <p class="banner__body">
+              {setup.conflictingInterfaces.join(", ")}
+              {setup.conflictingInterfaces.length === 1 ? "is" : "are"} already using TUN. Veil cannot
+              share interface routes or DNS with another tunnel, so TUN is unavailable while it runs.
+              Disable or stop the other tunnel and retry, or switch this session to System proxy.
+            </p>
+          </div>
+        </div>
+      {:else if setup.ready}
         <div class="banner banner--accent" role="status">
           <Icon name="check" size={15} />
           <div class="grow">
@@ -276,9 +305,22 @@
 
   {#snippet footer()}
     <button type="button" class="btn btn--quiet" disabled={installing} onclick={requestClose}>
-      {setup && !setup.ready && !setup.canInstall ? "Close" : "Cancel"}
+      {setup && !setup.ready && (!setup.canInstall || hasConflict) ? "Close" : "Cancel"}
     </button>
-    {#if setup && !setup.ready && !setup.canInstall}
+    {#if setup && hasConflict}
+      <button
+        type="button"
+        class="btn"
+        disabled={checking || installing}
+        onclick={() => void check()}
+      >
+        <Icon name="refresh" size={12} />
+        {checking ? "Checking" : "Retry check"}
+      </button>
+      <button type="button" class="btn" disabled={installing} onclick={openDiagnostics}>
+        <Icon name="diagnostics" size={12} /> Diagnostics
+      </button>
+    {:else if setup && !setup.ready && !setup.canInstall}
       <button type="button" class="btn" disabled={installing} onclick={openDiagnostics}>
         <Icon name="diagnostics" size={12} /> Diagnostics
       </button>
