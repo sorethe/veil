@@ -1,14 +1,23 @@
 <script lang="ts">
-  import { api, type Outbound, type Profile } from "../api";
-  import EmptyState from "../components/EmptyState.svelte";
-  import Field from "../components/Field.svelte";
+  import type { Profile } from "../api";
   import Icon from "../components/Icon.svelte";
-  import Instrument from "../components/Instrument.svelte";
   import Mark from "../components/Mark.svelte";
+  import OutboundBrowser from "../components/OutboundBrowser.svelte";
   import ProfileImport from "../components/ProfileImport.svelte";
   import ProfileMenu from "../components/ProfileMenu.svelte";
   import Segmented from "../components/Segmented.svelte";
-  import { copyText, errorMessage, hostOf, modeLabel } from "../format";
+  import Sparkline from "../components/Sparkline.svelte";
+  import StatusGlyph from "../components/StatusGlyph.svelte";
+  import {
+    copyText,
+    formatBytes,
+    formatDelay,
+    formatDuration,
+    formatSpeed,
+    modeLabel,
+    statusWord,
+    toMillis,
+  } from "../format";
   import { app, type View } from "../state.svelte";
 
   let { navigate }: { navigate: (view: View) => void } = $props();
@@ -16,26 +25,17 @@
   let importOpen = $state(false);
   let modeError = $state<string | null>(null);
   let selectedId = $state<string | null>(null);
-
-  let outbounds = $state<Outbound[]>([]);
-  let outboundsLoading = $state(false);
-  let outboundsError = $state<string | null>(null);
-  let groupTag = $state<string | null>(null);
-  let switching = $state(false);
-  let lastEngineKey = "";
+  let now = $state(Date.now());
 
   const selectedProfile = $derived(app.profiles.find((profile) => String(profile.id) === selectedId) ?? null);
-  const profileName = $derived(
-    app.engine.profileName ?? selectedProfile?.name ?? (app.profiles.length ? "Select a profile" : "No profile"),
-  );
   const mode = $derived(app.settings?.mode ?? "system");
   const locked = $derived(app.connected || app.busy);
-  const groups = $derived(outbounds.filter((outbound) => outbound.kind === "selector" || outbound.kind === "urltest"));
-  const activeGroup = $derived(groups.find((group) => group.tag === groupTag) ?? null);
+  const developerMode = $derived(app.settings?.developerMode === true);
 
   const capabilities = $derived(app.capabilities);
   const engineReady = $derived(app.clashApiReady);
   const tunAvailable = $derived(app.tunReady);
+  const systemProxySupported = $derived(app.platform?.systemProxySupported === true);
   const modeReady = $derived(mode !== "tun" || tunAvailable);
   const tunHint = $derived(
     capabilities === null
@@ -46,7 +46,7 @@
           ? "Unavailable: TUN exists but the backend reports no auto-route tooling (`ip`)."
           : !capabilities.dnsHijack
             ? "Unavailable: this core lacks the TUN DNS hijack support Veil requires."
-            : "Route IPv4 and IPv6 at the interface. Needs the helper and permissions.",
+            : "Route IPv4 and IPv6 at the interface.",
   );
 
   const canConnect = $derived(selectedProfile !== null && modeReady && engineReady);
@@ -70,13 +70,28 @@
 
   const modeOptions = $derived([
     { value: "system", label: "System proxy", hint: "Apps that honor desktop proxy settings" },
-    {
-      value: "tun",
-      label: "TUN",
-      hint: tunHint,
-      disabled: !tunAvailable,
-    },
+    { value: "tun", label: "TUN", hint: tunHint, disabled: !tunAvailable },
   ]);
+
+  const isLive = $derived(app.connected);
+  const failedWithRuntime = $derived(app.engine.status === "error" && app.engine.pid !== null);
+  const canStop = $derived(isLive || failedWithRuntime);
+  const buttonDisabled = $derived(app.busy || app.connectBusy || (!canStop && !canConnect));
+  const buttonLabel = $derived(
+    app.engine.status === "starting"
+      ? "Linking"
+      : app.engine.status === "stopping"
+        ? "Stopping"
+        : isLive
+          ? "Disconnect"
+          : failedWithRuntime
+            ? "Stop engine"
+            : app.engine.status === "error"
+              ? "Reconnect"
+              : "Connect",
+  );
+  const stateWord = $derived(statusWord(app.engine.status));
+  const activeMode = $derived(app.engine.mode ?? mode);
 
   const mixedPort = $derived(app.settings?.mixedPort ?? null);
   const proxyAddress = $derived(mixedPort === null ? "Unavailable" : `127.0.0.1:${mixedPort}`);
@@ -103,6 +118,44 @@
     return `Desktop mechanism: ${platform.systemProxyKind}. Applied when a system-proxy session starts.`;
   });
 
+  const downSpeedLabel = $derived(app.connected ? formatSpeed(app.stats.downSpeed) : "—");
+  const upSpeedLabel = $derived(app.connected ? formatSpeed(app.stats.upSpeed) : "—");
+  const trafficLabel = $derived(
+    app.connected ? `↓ ${formatBytes(app.stats.down)} · ↑ ${formatBytes(app.stats.up)}` : "—",
+  );
+  const durationLabel = $derived.by(() => {
+    if (!app.connected) return "—";
+    if (app.engine.startedAt) {
+      return formatDuration(Math.max(0, (now - toMillis(app.engine.startedAt)) / 1000));
+    }
+    return app.stats.duration > 0 ? formatDuration(app.stats.duration) : "—";
+  });
+  const latencyLabel = $derived(
+    !app.connected ? "—" : app.stats.latency === null ? "not measured" : formatDelay(app.stats.latency),
+  );
+  const connectionsLabel = $derived(app.connected ? String(app.stats.connections) : "—");
+  const downSeries = $derived(app.history.map((sample) => sample.down));
+  const upSeries = $derived(app.history.map((sample) => sample.up));
+  const coreVersion = $derived(app.engineInfo?.version ?? app.core?.version ?? null);
+  const corePath = $derived(app.engineInfo?.path ?? app.core?.path ?? null);
+  const profileIdLabel = $derived(app.engine.profileId ?? selectedProfile?.id ?? "—");
+  const modeHint = $derived(
+    locked
+      ? "Disconnect to change profile or mode."
+      : mode === "tun"
+        ? "Interface routing; the helper and permissions are required."
+        : "Apps that honor desktop proxy settings.",
+  );
+
+  $effect(() => {
+    if (!app.connected || !app.engine.startedAt) return;
+    now = Date.now();
+    const timer = window.setInterval(() => {
+      now = Date.now();
+    }, 1000);
+    return () => window.clearInterval(timer);
+  });
+
   $effect(() => {
     const engineProfile = app.engine.profileId;
     const profiles = app.profiles;
@@ -115,38 +168,6 @@
       selectedId = profiles[0] ? String(profiles[0].id) : null;
     }
   });
-
-  $effect(() => {
-    const key = `${app.engine.status}:${app.engine.startedAt ?? 0}`;
-    if (key === lastEngineKey) return;
-    lastEngineKey = key;
-    if (app.engine.status === "connected") {
-      void loadOutbounds();
-    } else {
-      outbounds = [];
-      outboundsError = null;
-      groupTag = null;
-    }
-  });
-
-  async function loadOutbounds(): Promise<void> {
-    if (app.engine.status !== "connected") return;
-    outboundsLoading = true;
-    try {
-      const list = await api.getOutbounds();
-      outbounds = list;
-      outboundsError = null;
-      const nextGroups = list.filter((outbound) => outbound.kind === "selector" || outbound.kind === "urltest");
-      if (!groupTag || !nextGroups.some((group) => group.tag === groupTag)) {
-        groupTag = nextGroups[0]?.tag ?? null;
-      }
-    } catch (cause) {
-      outboundsError = errorMessage(cause);
-      outbounds = [];
-    } finally {
-      outboundsLoading = false;
-    }
-  }
 
   async function toggleConnection(): Promise<void> {
     if (app.busy || app.connectBusy) return;
@@ -176,20 +197,6 @@
     if (error) {
       modeError = error;
       app.notify("error", "Mode not changed", error);
-    }
-  }
-
-  async function switchOutbound(tag: string): Promise<void> {
-    if (!activeGroup || switching) return;
-    switching = true;
-    try {
-      await api.selectOutbound(activeGroup.tag, tag);
-      await loadOutbounds();
-      app.notify("success", "Outbound selected", `${activeGroup.tag} → ${tag}`);
-    } catch (cause) {
-      app.notify("error", "Could not switch outbound", errorMessage(cause));
-    } finally {
-      switching = false;
     }
   }
 
@@ -254,96 +261,26 @@
   <section class="first-run panel">
     <div class="first-run__mark"><Mark size={42} /></div>
     <span class="kicker">No profiles</span>
-    <h2 class="first-run__title">Add a configuration to open the veil.</h2>
+    <h2 class="first-run__title">Import a configuration to begin.</h2>
     <p class="first-run__desc">
-      Import a sing-box config, a subscription URL, share links, or a QR image. Everything is parsed and
-      validated by the local engine before it is written.
+      Add a sing-box config, subscription, share links, or QR image. Veil validates it locally before saving.
     </p>
     <div class="first-run__actions">
       <button type="button" class="btn btn--primary" onclick={() => (importOpen = true)}>
         <Icon name="import" size={13} /> Import profile
       </button>
-      <button type="button" class="btn" onclick={() => navigate("diagnostics")}>Run diagnostics</button>
-    </div>
-    <div class="first-run__facts">
-      <span><span class="kicker">Core</span> {app.engineInfo?.version ?? app.core?.version ?? "unknown"}</span>
-      <span><span class="kicker">Clash API</span> {capabilities ? (capabilities.clashApi ? "available" : "missing") : "unknown"}</span>
-      <span><span class="kicker">Desktop</span> {app.platform?.desktop ?? "unknown"} · {app.platform?.session ?? "unknown"}</span>
-      <span><span class="kicker">TUN</span> {capabilities ? (tunAvailable ? "available" : "unavailable") : "unknown"}</span>
-      <span><span class="kicker">Tray</span> {app.platform?.trayAvailable ? "available" : "not available"}</span>
     </div>
   </section>
 {:else}
-  <div class="page-head">
+  <div class="page-head overview-head">
     <div class="page-head__text">
       <span class="kicker">Overview</span>
       <h1 class="page-title">Session</h1>
-      <p class="page-desc">One profile, one engine process, one honest view of the link.</p>
     </div>
-    <div class="head-actions">
-      <button type="button" class="btn" onclick={() => navigate("outbounds")}>Outbounds</button>
-      <button type="button" class="btn" onclick={() => (importOpen = true)}>
-        <Icon name="import" size={12} /> Import
-      </button>
-    </div>
-  </div>
-
-  <div class="controls">
-    <ProfileMenu
-      profiles={app.profiles}
-      activeId={selectedId}
-      disabled={locked}
-      reason="Disconnect before switching profiles."
-      onselect={(id) => (selectedId = id)}
-      onmanage={() => navigate("profiles")}
-    />
-
-    <div class="mode">
-      <span class="kicker">Default mode</span>
-      <div class="mode__row">
-        <Segmented
-          value={mode}
-          options={modeOptions}
-          label="Proxy mode"
-          disabled={locked}
-          onchange={(next) => void setMode(next)}
-        />
-        {#if locked}<span class="mode__lock">Locked while a session is active</span>{/if}
-      </div>
-      <p class="mode__desc">
-        System proxy covers applications that honor desktop proxy settings. TUN routes IPv4 and IPv6 at the
-        interface and needs the helper plus permissions.
-      </p>
-      {#if !tunAvailable}
-        <p class="mode__warn">{tunHint}{#if mode === "tun"} Choose System proxy before connecting.{/if}</p>
-      {/if}
-      {#if !engineReady}
-        <p class="mode__warn" role="alert">
-          {capabilities === null
-            ? "Engine capabilities were not reported; connecting is disabled until the backend reports them."
-            : "Connecting is disabled: the core lacks the Clash API Veil needs for health, stats, and outbounds."}
-        </p>
-      {/if}
-      {#if modeError}<p class="mode__error" role="alert">{modeError}</p>{/if}
-    </div>
-
-    <div class="controls__facts">
-      <div>
-        <span class="kicker">Applied mode</span>
-        <p class="mono">{app.engine.mode ? modeLabel(app.engine.mode) : "—"}</p>
-      </div>
-      <div>
-        <span class="kicker">Profile source</span>
-        <p class="mono truncate">
-          {#if selectedProfile}
-            {selectedProfile.kind === "subscription" && selectedProfile.subscriptionUrl
-              ? hostOf(selectedProfile.subscriptionUrl)
-              : selectedProfile.kind}
-          {:else}
-            —
-          {/if}
-        </p>
-      </div>
+    <div class="head-actions overview-head__status">
+      <StatusGlyph status={app.engine.status} size={11} />
+      <span class="overview-head__word mono {`st-${app.engine.status}`}">{stateWord}</span>
+      <span class="tag">{modeLabel(activeMode)}</span>
     </div>
   </div>
 
@@ -381,132 +318,189 @@
     </div>
   {/if}
 
-  <Instrument
-    engine={app.engine}
-    stats={app.stats}
-    history={app.history}
-    connectBusy={app.connectBusy}
-    canConnect={canConnect}
-    disabledReason={disabledReason}
-    profileName={profileName}
-    onToggle={() => void toggleConnection()}
-  />
-
-  <div class="lower">
-    <section class="panel" aria-labelledby="quick-outbound-title">
-      <div class="panel__head">
-        <span class="panel__title" id="quick-outbound-title">Quick outbound</span>
-        <button type="button" class="btn btn--sm btn--quiet" onclick={() => navigate("outbounds")}>
-          All outbounds
-        </button>
-      </div>
-      {#if !app.connected}
-        <EmptyState
-          title={app.engine.status === "starting" ? "Session is starting" : "Outbounds need a live session"}
-          description="Selector and URL-test groups are read from the running engine."
-          icon="outbounds"
-        >
-          <button type="button" class="btn btn--sm" onclick={() => navigate("outbounds")}>Open outbounds</button>
-        </EmptyState>
-      {:else if outboundsLoading}
-        <div class="panel__body"><p class="muted small">Reading outbounds from the engine…</p></div>
-      {:else if outboundsError}
-        <div class="panel__body stack">
-          <p class="danger small break">{outboundsError}</p>
-          <button type="button" class="btn btn--sm" onclick={() => void loadOutbounds()}>Retry</button>
+  <div class="overview-grid">
+    <aside class="monitor panel" aria-label="Session monitor">
+      <header class="monitor__head">
+        <div class="monitor__state" aria-live="polite">
+          <StatusGlyph status={app.engine.status} size={13} />
+          <span class="monitor__word {`st-${app.engine.status}`}">{stateWord}</span>
         </div>
-      {:else if !groups.length}
-        <EmptyState
-          title="No selector groups"
-          description="This configuration has no selector or URL-test outbounds to switch."
-          icon="outbounds"
+        <span class="tag">{modeLabel(activeMode)}</span>
+      </header>
+
+      <div class="monitor__body">
+        <ProfileMenu
+          profiles={app.profiles}
+          activeId={selectedId}
+          disabled={locked}
+          reason="Disconnect before switching profiles."
+          onselect={(id) => (selectedId = id)}
+          onmanage={() => navigate("profiles")}
         />
-      {:else if activeGroup}
-        <div class="panel__body stack">
-          <Field label="Group" forId="quick-group">
-            <select
-              id="quick-group"
-              class="select"
-              onchange={(event) => (groupTag = event.currentTarget.value)}
-            >
-              {#each groups as group (group.tag)}
-                <option value={group.tag} selected={group.tag === groupTag}>
-                  {group.tag} · {group.kind}
-                </option>
-              {/each}
-            </select>
-          </Field>
-          <div class="options" role="group" aria-label={`Options in ${activeGroup.tag}`}>
-            {#each activeGroup.options as option (option)}
-              <button
-                type="button"
-                class="option"
-                class:option--active={option === activeGroup.now}
-                aria-pressed={option === activeGroup.now}
-                disabled={switching}
-                onclick={() => void switchOutbound(option)}
-              >
-                <span class="truncate">{option}</span>
-                {#if option === activeGroup.now}<span class="tag tag--accent">selected</span>{/if}
-              </button>
-            {/each}
-          </div>
-          {#if switching}<p class="small muted">Switching…</p>{/if}
-        </div>
-      {/if}
-    </section>
 
-    <section class="panel" aria-labelledby="manual-proxy-title">
-      <div class="panel__head">
-        <span class="panel__title" id="manual-proxy-title">Manual proxy</span>
-        <span class="tag">{app.engine.proxy ? "applied" : "standby"}</span>
-      </div>
-      <div class="panel__body stack">
-        <div class="proxy-address">
-          <span class="mono proxy-address__value">{proxyAddress}</span>
-          <button
-            type="button"
-            class="icon-btn"
-            aria-label="Copy proxy address"
-            title="Copy proxy address"
-            disabled={mixedPort === null}
-            onclick={() => void copy("Proxy address", proxyAddress)}
-          >
-            <Icon name="copy" size={14} />
-          </button>
-        </div>
-        <p class="small muted">Mixed HTTP + SOCKS5 on loopback.</p>
-
-        <div class="stack stack--sm">
-          <div class="row">
-            <span class="kicker">Shell environment</span>
-            <button
-              type="button"
-              class="btn btn--sm btn--quiet right"
-              disabled={mixedPort === null}
-              onclick={() => void copy("Environment block", envBlock)}
-            >
-              <Icon name="copy" size={11} /> Copy
-            </button>
-          </div>
-          <pre class="code">{envBlock}</pre>
-        </div>
-
-        <div class="mechanism">
-          <span class="kicker">Actual desktop mechanism</span>
-          <p class="small">{mechanism}</p>
-          {#if capabilities?.systemProxyBackends.length}
-            <p class="small faint">
-              Detected backends: {capabilities.systemProxyBackends.join(" · ")}
+        <div class="monitor__field">
+          <span class="kicker">Mode</span>
+          <Segmented
+            value={mode}
+            options={modeOptions}
+            label="Proxy mode"
+            disabled={locked}
+            onchange={(next) => void setMode(next)}
+          />
+          <p class="monitor__hint">{modeHint}</p>
+          {#if mode === "system" && !systemProxySupported}
+            <p class="monitor__warn">
+              This desktop reports no usable system-proxy backend. The session
+              {app.connected ? "is" : "will be"} manual-only; use the proxy below.
             </p>
           {/if}
+          {#if mode === "tun" && !modeReady}
+            <p class="monitor__warn">{tunHint} Choose System proxy before connecting.</p>
+          {/if}
+          {#if !engineReady}
+            <p class="monitor__warn" role="alert">
+              {capabilities === null
+                ? "Engine capabilities were not reported; connecting is disabled."
+                : "Connecting is disabled: the core lacks the Clash API Veil needs."}
+            </p>
+          {/if}
+          {#if modeError}<p class="monitor__error" role="alert">{modeError}</p>{/if}
         </div>
 
-        <p class="small faint">
-          System proxy only covers applications that honor desktop proxy settings. Traffic from apps that
-          ignore it stays direct; use TUN when you need interface-level coverage.
-        </p>
+        <div class="monitor__rates">
+          <div class="monitor__rate">
+            <span class="kicker">Download</span>
+            <span class="monitor__rate-value mono">{downSpeedLabel}</span>
+            {#if app.connected && app.history.length > 1}
+              <Sparkline values={downSeries} tone={isLive ? "accent" : "muted"} label="Download speed history" height={20} />
+            {/if}
+          </div>
+          <div class="monitor__rate">
+            <span class="kicker">Upload</span>
+            <span class="monitor__rate-value mono">{upSpeedLabel}</span>
+            {#if app.connected && app.history.length > 1}
+              <Sparkline values={upSeries} tone="muted" label="Upload speed history" height={20} />
+            {/if}
+          </div>
+        </div>
+
+        <dl class="monitor__stats">
+          <div class="monitor__stat">
+            <dt class="kicker">Traffic</dt>
+            <dd class="mono">{trafficLabel}</dd>
+          </div>
+          <div class="monitor__stat">
+            <dt class="kicker">Connections</dt>
+            <dd class="mono">{connectionsLabel}</dd>
+          </div>
+          <div class="monitor__stat">
+            <dt class="kicker">Duration</dt>
+            <dd class="mono">{durationLabel}</dd>
+          </div>
+          <div class="monitor__stat">
+            <dt class="kicker">Latency</dt>
+            <dd class="mono" class:monitor__stat-value--none={!app.connected || app.stats.latency === null}>
+              {latencyLabel}
+            </dd>
+          </div>
+        </dl>
+
+        <div class="monitor__actions">
+          {#if disabledReason}
+            <p class="monitor__blocked">{disabledReason}</p>
+          {:else}
+            <span class="monitor__shortcut mono">Ctrl / Cmd + Enter</span>
+          {/if}
+          <button
+            type="button"
+            class="monitor__power"
+            class:monitor__power--live={isLive}
+            disabled={buttonDisabled}
+            title={disabledReason ?? undefined}
+            onclick={() => void toggleConnection()}
+          >
+            <Icon name="power" size={16} />
+            <span>{buttonLabel}</span>
+          </button>
+        </div>
       </div>
+
+      <details class="monitor__details">
+        <summary>Connection details</summary>
+        <div class="monitor__details-body">
+          <dl class="kv">
+            <div class="kv__row">
+              <dt>Proxy address</dt>
+              <dd>
+                <span class="row">
+                  <span class="mono break">{proxyAddress}</span>
+                  <button
+                    type="button"
+                    class="icon-btn"
+                    aria-label="Copy proxy address"
+                    title="Copy proxy address"
+                    disabled={mixedPort === null}
+                    onclick={() => void copy("Proxy address", proxyAddress)}
+                  >
+                    <Icon name="copy" size={12} />
+                  </button>
+                </span>
+              </dd>
+            </div>
+            <div class="kv__row">
+              <dt>Desktop mechanism</dt>
+              <dd class="break">{mechanism}</dd>
+            </div>
+            {#if developerMode}
+              <div class="kv__row">
+                <dt>Engine PID</dt>
+                <dd class="mono">{app.engine.pid ?? "—"}</dd>
+              </div>
+              <div class="kv__row">
+                <dt>Core version</dt>
+                <dd class="mono">{coreVersion ?? "not reported"}</dd>
+              </div>
+              <div class="kv__row">
+                <dt>Core path</dt>
+                <dd class="mono break">{corePath ?? "not reported"}</dd>
+              </div>
+              <div class="kv__row">
+                <dt>Clash API port</dt>
+                <dd class="mono">{app.settings?.apiPort ?? "—"}</dd>
+              </div>
+              <div class="kv__row">
+                <dt>Profile ID</dt>
+                <dd class="mono">{profileIdLabel}</dd>
+              </div>
+            {/if}
+          </dl>
+
+          {#if developerMode}
+            <div class="monitor__env">
+              <div class="monitor__env-head">
+                <span class="kicker">Proxy environment</span>
+                <button
+                  type="button"
+                  class="btn btn--sm btn--quiet"
+                  disabled={mixedPort === null}
+                  onclick={() => void copy("Environment block", envBlock)}
+                >
+                  <Icon name="copy" size={11} /> Copy env
+                </button>
+              </div>
+              {#if mixedPort === null}
+                <p class="small muted">Proxy port unavailable.</p>
+              {:else}
+                <pre class="code monitor__code">{envBlock}</pre>
+              {/if}
+            </div>
+          {/if}
+        </div>
+      </details>
+    </aside>
+
+    <section class="workspace" aria-label="Outbound workspace">
+      <OutboundBrowser />
     </section>
   </div>
 {/if}
@@ -516,61 +510,95 @@
 {/if}
 
 <style>
-  .controls {
+  .overview-head {
+    padding-bottom: 10px;
+    margin-bottom: var(--space-4);
+    align-items: center;
+  }
+
+  .overview-head .page-title {
+    font-size: var(--fs-xl);
+  }
+
+  .overview-head__status {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+
+  .overview-head__word {
+    font-size: var(--fs-2xs);
+    letter-spacing: 0.14em;
+  }
+
+  .overview-grid {
     display: grid;
-    grid-template-columns: minmax(220px, 320px) minmax(260px, 1fr) auto;
+    grid-template-columns: minmax(272px, 25%) minmax(0, 1fr);
     gap: var(--space-5);
     align-items: start;
-    padding: 0 0 var(--space-4);
+    min-width: 0;
+  }
+
+  .monitor {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .monitor__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    padding: 10px var(--space-4);
     border-bottom: 1px solid var(--line);
-    margin-bottom: var(--space-4);
   }
 
-  @media (max-width: 980px) {
-    .controls {
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    }
-
-    .controls__facts {
-      grid-column: 1 / -1;
-      display: flex;
-      gap: var(--space-6);
-    }
+  .monitor__state {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
   }
 
-  @media (max-width: 680px) {
-    .controls {
-      grid-template-columns: minmax(0, 1fr);
-    }
+  .monitor__word {
+    font-family: var(--font-mono);
+    font-size: var(--fs-sm);
+    font-weight: 500;
+    letter-spacing: 0.16em;
+    white-space: nowrap;
   }
 
-  .mode {
+  .monitor__body {
+    display: grid;
+    gap: var(--space-4);
+    padding: var(--space-4);
+    min-width: 0;
+  }
+
+  .monitor__body :global(.profile-menu) {
+    width: 100%;
+  }
+
+  .monitor__field {
     display: grid;
     gap: 6px;
     min-width: 0;
   }
 
-  .mode__row {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    flex-wrap: wrap;
-  }
-
-  .mode__lock {
-    font-family: var(--font-mono);
+  .monitor__hint {
     font-size: var(--fs-2xs);
-    color: var(--faint);
-  }
-
-  .mode__desc {
-    font-size: var(--fs-xs);
     color: var(--muted);
-    max-width: 56ch;
-    line-height: 1.5;
+    line-height: 1.45;
   }
 
-  .mode__error {
+  .monitor__warn {
+    font-size: var(--fs-2xs);
+    color: var(--warning);
+    line-height: 1.45;
+  }
+
+  .monitor__error {
     font-family: var(--font-mono);
     font-size: var(--fs-2xs);
     color: var(--error);
@@ -578,21 +606,218 @@
     white-space: pre-wrap;
   }
 
-  .mode__warn {
+  .monitor__rates {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-4);
+    padding-top: var(--space-3);
+    border-top: 1px solid var(--line);
+    min-width: 0;
+  }
+
+  .monitor__rate {
+    display: grid;
+    gap: 2px;
+    align-content: start;
+    min-width: 0;
+  }
+
+  .monitor__rate-value {
+    font-size: var(--fs-xl);
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .monitor__stats {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-3) var(--space-4);
+    padding-top: var(--space-3);
+    border-top: 1px solid var(--line);
+    min-width: 0;
+  }
+
+  .monitor__stat {
+    display: grid;
+    gap: 1px;
+    min-width: 0;
+  }
+
+  .monitor__stat dd {
+    font-size: var(--fs-xs);
+    overflow-wrap: anywhere;
+  }
+
+  .monitor__stat-value--none {
+    color: var(--faint);
+  }
+
+  .monitor__actions {
+    display: grid;
+    gap: 6px;
+    padding-top: var(--space-3);
+    border-top: 1px solid var(--line);
+    min-width: 0;
+  }
+
+  .monitor__shortcut {
     font-size: var(--fs-2xs);
+    color: var(--faint);
+    letter-spacing: 0.04em;
+  }
+
+  .monitor__blocked {
     color: var(--warning);
+    font-family: var(--font-mono);
+    font-size: var(--fs-2xs);
     line-height: 1.45;
   }
 
-  .controls__facts {
-    display: grid;
-    gap: var(--space-3);
-    min-width: 140px;
+  .monitor__power {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+    width: 100%;
+    height: 42px;
+    padding: 0 12px;
+    border: 1px solid var(--line-strong);
+    background: var(--raised);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    clip-path: polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 9px 100%, 0 calc(100% - 9px));
+    transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease),
+      border-color var(--fast) var(--ease);
   }
 
-  .controls__facts p {
-    font-size: var(--fs-sm);
-    margin-top: 2px;
+  .monitor__power:hover:not(:disabled) {
+    border-color: var(--text);
+  }
+
+  .monitor__power--live {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-ink);
+  }
+
+  .monitor__power--live:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--accent) 88%, var(--text));
+    border-color: var(--accent);
+  }
+
+  .monitor__power:disabled {
+    opacity: 0.45;
+  }
+
+  .monitor__details {
+    border-top: 1px solid var(--line);
+  }
+
+  .monitor__details summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px var(--space-4);
+    cursor: pointer;
+    list-style: none;
+    font-family: var(--font-mono);
+    font-size: var(--fs-2xs);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    user-select: none;
+  }
+
+  .monitor__details summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .monitor__details summary::after {
+    content: "+";
+    margin-left: auto;
+    color: var(--faint);
+  }
+
+  .monitor__details[open] summary::after {
+    content: "−";
+  }
+
+  .monitor__details summary:hover {
+    color: var(--text);
+  }
+
+  .monitor__details-body {
+    display: grid;
+    gap: var(--space-4);
+    padding: 0 var(--space-4) var(--space-4);
+    min-width: 0;
+  }
+
+  .kv {
+    display: grid;
+    gap: 0;
+    min-width: 0;
+  }
+
+  .kv__row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+    padding: 7px 0;
+    border-bottom: 1px solid var(--line);
+    min-width: 0;
+  }
+
+  .kv__row:last-child {
+    border-bottom: 0;
+    padding-bottom: 0;
+  }
+
+  .kv__row dt {
+    font-size: var(--fs-2xs);
+    color: var(--muted);
+  }
+
+  .kv__row dd {
+    font-size: var(--fs-xs);
+    min-width: 0;
+  }
+
+  .kv__row dd .mono {
+    font-size: var(--fs-xs);
+  }
+
+  .monitor__env {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .monitor__env-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+
+  .monitor__code {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: var(--fs-2xs);
+  }
+
+  .workspace {
+    height: clamp(480px, calc(100vh - 205px), 900px);
+    min-height: 380px;
+    min-width: 0;
   }
 
   .session-error {
@@ -602,80 +827,6 @@
 
   .session-error .mono {
     overflow-wrap: anywhere;
-  }
-
-  .lower {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: var(--space-4);
-    margin-top: var(--space-4);
-  }
-
-  @media (max-width: 900px) {
-    .lower {
-      grid-template-columns: minmax(0, 1fr);
-    }
-  }
-
-  .options {
-    display: grid;
-    gap: 2px;
-    max-height: 220px;
-    overflow: auto;
-    border: 1px solid var(--line);
-    padding: 2px;
-    background: var(--field);
-  }
-
-  .option {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-2);
-    width: 100%;
-    padding: 6px 8px;
-    font-family: var(--font-mono);
-    font-size: var(--fs-xs);
-    color: var(--muted);
-    text-align: left;
-    border: 1px solid transparent;
-  }
-
-  .option:hover:not(:disabled) {
-    color: var(--text);
-    background: var(--raised);
-  }
-
-  .option--active {
-    color: var(--text);
-    border-color: var(--line);
-    background: var(--raised);
-  }
-
-  .option:disabled {
-    opacity: 0.6;
-  }
-
-  .proxy-address {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-2);
-    padding: 8px 10px;
-    border: 1px solid var(--line);
-    background: var(--field);
-  }
-
-  .proxy-address__value {
-    font-size: var(--fs-lg);
-    letter-spacing: -0.01em;
-  }
-
-  .mechanism {
-    display: grid;
-    gap: 3px;
-    padding-top: var(--space-3);
-    border-top: 1px solid var(--line);
   }
 
   .first-run {
@@ -711,17 +862,23 @@
     margin-top: var(--space-2);
   }
 
-  .first-run__facts {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: var(--space-5);
-    margin-top: var(--space-4);
-    padding-top: var(--space-4);
-    border-top: 1px solid var(--line);
-    width: 100%;
-    font-family: var(--font-mono);
-    font-size: var(--fs-xs);
-    color: var(--muted);
+  @media (max-width: 1100px) {
+    .overview-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .workspace {
+      height: clamp(460px, 72vh, 780px);
+    }
+  }
+
+  @media (max-width: 560px) {
+    .monitor__rates {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .monitor__stats {
+      grid-template-columns: minmax(0, 1fr);
+    }
   }
 </style>

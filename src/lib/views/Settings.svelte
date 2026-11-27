@@ -4,7 +4,7 @@
   import Icon from "../components/Icon.svelte";
   import Segmented from "../components/Segmented.svelte";
   import Toggle from "../components/Toggle.svelte";
-  import { errorMessage } from "../format";
+  import { errorMessage, modeLabel } from "../format";
   import { app } from "../state.svelte";
 
   const initial = untrack(() => app.settings);
@@ -21,6 +21,7 @@
   let minimizeToTray = $state(initial?.minimizeToTray ?? false);
   let logLevel = $state(initial?.logLevel ?? "info");
   let intervalHours = $state(String(initial?.subscriptionIntervalHours ?? ""));
+  let developerMode = $state(initial?.developerMode === true);
   let errors = $state<Record<string, string | null>>({});
   let detecting = $state(false);
   let coreNote = $state<string | null>(null);
@@ -102,6 +103,7 @@
     minimizeToTray = settings.minimizeToTray;
     logLevel = settings.logLevel;
     intervalHours = String(settings.subscriptionIntervalHours);
+    developerMode = settings.developerMode === true;
   }
 
   async function apply(field: string, patch: Partial<Settings>, success?: string): Promise<boolean> {
@@ -251,6 +253,11 @@
     void apply("logLevel", { logLevel: next });
   }
 
+  function changeDeveloperMode(next: boolean): void {
+    developerMode = next;
+    void apply("developerMode", { developerMode: next });
+  }
+
   async function openConfigFolder(): Promise<void> {
     try {
       await api.openConfigDir();
@@ -336,27 +343,6 @@
             }}
           />
           {#if errors.mixedPort}<p class="field__error" role="alert">{errors.mixedPort}</p>{/if}
-        </dd>
-      </div>
-
-      <div class="deflist__row">
-        <dt class="setting">
-          <span class="setting__label">API port</span>
-          <span class="setting__hint">Local Clash API used for stats, connections, and outbound switching.</span>
-        </dt>
-        <dd class="setting__control">
-          <input
-            class="input input--mono port"
-            type="text"
-            inputmode="numeric"
-            autocomplete="off"
-            bind:value={apiPort}
-            onchange={() => commitPort("apiPort")}
-            onkeydown={(event) => {
-              if (event.key === "Enter") commitPort("apiPort");
-            }}
-          />
-          {#if errors.apiPort}<p class="field__error" role="alert">{errors.apiPort}</p>{/if}
         </dd>
       </div>
 
@@ -454,13 +440,14 @@
     </dl>
   </section>
 
-  <section class="settings-section" aria-labelledby="settings-engine">
+  <section class="settings-section" aria-labelledby="settings-advanced">
     <div class="section-head">
-      <h2 class="section-title" id="settings-engine">Engine</h2>
+      <h2 class="section-title" id="settings-advanced">Advanced</h2>
       <p class="section-desc">
-        Engine: <span class="mono">{app.engineInfo?.id ?? "—"}</span> · API
+        Engine internals and technical visibility. Engine:
+        <span class="mono">{app.engineInfo?.id ?? "—"}</span> · API
         <span class="mono">{app.engineInfo?.api ?? "—"}</span>. Detected core:
-        <span class="mono">{coreVersion ?? "not reported"}</span>. The path is used on the next start.
+        <span class="mono">{coreVersion ?? "not reported"}</span>.
       </p>
       {#if !app.clashApiReady}
         <p class="inline-warning" role="alert">
@@ -470,6 +457,43 @@
       {/if}
     </div>
     <dl class="deflist">
+      <div class="deflist__row">
+        <dt class="setting">
+          <span class="setting__label">Current session mode</span>
+          <span class="setting__hint">The live engine mode, or the saved default while disconnected.</span>
+        </dt>
+        <dd class="setting__control">
+          <span class="mono small">
+            {app.connected && app.engine.mode
+              ? modeLabel(app.engine.mode)
+              : app.connected
+                ? "connected · mode not reported"
+                : `${modeLabel(mode)} · default`}
+          </span>
+        </dd>
+      </div>
+
+      <div class="deflist__row">
+        <dt class="setting">
+          <span class="setting__label">API port</span>
+          <span class="setting__hint">Local Clash API used for stats, connections, and outbound switching.</span>
+        </dt>
+        <dd class="setting__control">
+          <input
+            class="input input--mono port"
+            type="text"
+            inputmode="numeric"
+            autocomplete="off"
+            bind:value={apiPort}
+            onchange={() => commitPort("apiPort")}
+            onkeydown={(event) => {
+              if (event.key === "Enter") commitPort("apiPort");
+            }}
+          />
+          {#if errors.apiPort}<p class="field__error" role="alert">{errors.apiPort}</p>{/if}
+        </dd>
+      </div>
+
       <div class="deflist__row">
         <dt class="setting">
           <span class="setting__label">Core binary path</span>
@@ -508,6 +532,23 @@
             {/each}
           </select>
           {#if errors.logLevel}<p class="field__error" role="alert">{errors.logLevel}</p>{/if}
+        </dd>
+      </div>
+
+      <div class="deflist__row">
+        <dt class="setting">
+          <span class="setting__label">Developer mode</span>
+          <span class="setting__hint">
+            Reveals engine PID, core version/path, Clash API port, and profile ID in Overview's Connection
+            details. It never changes connection behavior.
+          </span>
+        </dt>
+        <dd class="setting__control">
+          <div class="toggle-line">
+            <Toggle checked={developerMode} label="Developer mode" onchange={changeDeveloperMode} />
+            <span class="toggle-line__state mono">{developerMode ? "on" : "off"}</span>
+          </div>
+          {#if errors.developerMode}<p class="field__error" role="alert">{errors.developerMode}</p>{/if}
         </dd>
       </div>
     </dl>
@@ -571,7 +612,7 @@
 
 <style>
   .settings {
-    max-width: 920px;
+    max-width: 1100px;
   }
 
   .settings-section {
@@ -674,5 +715,25 @@
     font-size: var(--fs-2xs);
     color: var(--faint);
     max-width: 80ch;
+  }
+
+  @media (max-width: 1080px) {
+    .settings-section .deflist__row {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 6px;
+    }
+
+    .setting__hint {
+      max-width: 68ch;
+    }
+
+    .setting__control .select,
+    .setting__control .input-row {
+      width: 100%;
+    }
+
+    .port {
+      width: min(100%, 130px);
+    }
   }
 </style>

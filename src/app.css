@@ -48,7 +48,7 @@
   --radius-md: 4px;
 
   --sidebar-w: 216px;
-  --content-w: 1080px;
+  --content-w: 1440px;
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
   --fast: 140ms;
 
@@ -354,6 +354,13 @@ hr {
 @media (max-width: 940px) {
   .main {
     padding: var(--space-4) var(--space-4) var(--space-6);
+  }
+}
+
+@media (min-width: 1440px) {
+  .main {
+    padding-left: var(--space-5);
+    padding-right: var(--space-5);
   }
 }
 

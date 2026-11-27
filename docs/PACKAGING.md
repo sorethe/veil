@@ -11,7 +11,9 @@ privileged helper, `veil-helper`, that is started through `pkexec` for TUN mode.
 | `packaging/make-source-tarball.sh` | Creates `packaging/veil-<pkgver>.tar.gz` from the working tree. |
 | `packaging/.SRCINFO` | Generated from the PKGBUILD; regenerate after any PKGBUILD edit. |
 | `install-helper.sh` | Development install of `/usr/bin/veil-helper`, polkit policy, desktop entry, icon. Not for pacman-managed systems. |
-| `Makefile` | `make build`, `make test`, `make install-helper`, `make source-tarball`, etc. |
+| `packaging/install-local.sh` | User-local app, core, icon, and desktop entry; no sudo. |
+| `packaging/uninstall-local.sh` | Removes the user-local app, core, icon, and desktop entry; keeps profile data/settings. |
+| `Makefile` | `make build`, `make test`, `make install-helper`, `make install-local`, `make uninstall-local`, `make source-tarball`, etc. |
 | `src-tauri/resources/dev.veil.helper.policy` | Polkit action `dev.veil.helper`. |
 | `src-tauri/resources/veil.desktop` | Desktop entry (`Exec=veil`, `Icon=veil`, `StartupWMClass=veil`). |
 | `src-tauri/icons/icon.png` | 512x512 RGBA PNG installed as `hicolor/512x512/apps/veil.png`. |
@@ -36,6 +38,77 @@ Outputs:
 - `src-tauri/helper/target/release/veil-helper`
 
 The release app embeds the built frontend (`custom-protocol` is a default cargo feature).
+
+## User-local launcher (no sudo)
+
+Build the release first, then create a per-user launcher. This installs only into the
+current user's home and does not use root, modify a package database, or copy profiles.
+
+```sh
+make install-local
+# equivalent:
+./packaging/install-local.sh
+```
+
+Installed paths:
+
+| Path | Contents |
+| --- | --- |
+| `~/.local/opt/veil/veil` | Release app binary. |
+| `~/.local/opt/veil/sing-box` | Official sing-box 1.14.5 core beside the app. The exe-dir core search finds it without setting `corePath`. |
+| `~/.local/share/icons/hicolor/512x512/apps/veil.png` | 512x512 RGBA application icon. |
+| `~/.local/share/applications/veil.desktop` | Application launcher entry. |
+
+The launcher entry contains:
+
+```ini
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Veil
+Comment=Linux desktop proxy client powered by sing-box
+Exec=/home/deus/.local/opt/veil/veil
+TryExec=/home/deus/.local/opt/veil/veil
+Icon=veil
+Terminal=false
+Categories=Network;Utility;Security;
+StartupNotify=true
+StartupWMClass=veil
+```
+
+Validate and refresh the desktop database:
+
+```sh
+update-desktop-database ~/.local/share/applications
+desktop-file-validate ~/.local/share/applications/veil.desktop
+gio info ~/.local/share/applications/veil.desktop
+~/.local/opt/veil/sing-box version
+```
+
+`desktop-file-validate` is expected to pass with hints for the intentionally multi-category
+`Categories` value. Launch Veil from the desktop application launcher, with `gtk-launch veil`,
+or directly with `~/.local/opt/veil/veil`.
+
+Normal launches use the user's default XDG locations, `~/.local/share/veil` (database/logs)
+and `~/.config/veil` (settings). They do **not** read the isolated `/tmp/veil-app-data` or
+`/tmp/veil-app-config` directories. The launcher install **preserves existing profile data**:
+it never moves, deletes, copies, or resets `~/.local/share/veil/veil.db` or
+`~/.config/veil/settings.json`, and no subscription is copied from test data. Existing profiles
+remain visible after installing. Overview shows **First run / Import profile** only when the
+default database genuinely has no profiles. Close any existing Veil/test instance before
+launching the installed entry.
+
+Uninstall the launcher and binaries without deleting user data:
+
+```sh
+make uninstall-local
+# equivalent:
+./packaging/uninstall-local.sh
+```
+
+This removes `~/.local/opt/veil/veil`, `~/.local/opt/veil/sing-box`, the icon, and
+`veil.desktop`. It leaves `~/.local/share/veil` (profiles and logs) and `~/.config/veil`
+(settings) intact.
 
 ## Arch package (PKGBUILD)
 

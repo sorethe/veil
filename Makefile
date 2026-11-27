@@ -2,7 +2,7 @@ PNPM ?= pnpm
 CARGO ?= cargo
 VENDOR_CORE := $(CURDIR)/vendor/sing-box-1.14.5-linux-amd64/sing-box
 
-.PHONY: help install build frontend backend helper test smoke install-helper source-tarball clean
+.PHONY: help install build frontend backend helper test smoke install-helper install-local uninstall-local source-tarball clean
 
 help:
 	@echo "Veil targets:"
@@ -14,6 +14,8 @@ help:
 	@echo "  test           cargo test (backend) + helper tests"
 	@echo "  smoke          real sing-box smoke test via examples/engine_smoke.rs"
 	@echo "  install-helper build + sudo install of veil-helper and polkit policy"
+	@echo "  install-local  user-local app launcher, app binary, core and icon (no sudo)"
+	@echo "  uninstall-local remove the user-local launcher and binaries (keeps data)"
 	@echo "  clean          remove build outputs"
 
 install:
@@ -39,6 +41,12 @@ smoke:
 
 install-helper:
 	./install-helper.sh
+
+install-local:
+	./packaging/install-local.sh
+
+uninstall-local:
+	./packaging/uninstall-local.sh
 
 clean:
 	rm -rf dist

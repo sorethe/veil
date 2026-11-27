@@ -58,6 +58,7 @@ normalize those, but this backend only emits the envelope.
 | `list_profiles` | – | `Profile[]` |
 | `create_profile` | `name: string`, `content: string` | `Profile` |
 | `update_profile` | `id: number`, `name: string`, `content?: string` | `Profile` |
+| `set_profile_auto_update` | `id: number`, `enabled: boolean` | `Profile` |
 | `delete_profile` | `id: number` | `null` |
 | `duplicate_profile` | `id: number`, `name: string` | `Profile` |
 | `import_json` | `name: string`, `content: string`, `source?: string` | `Profile` |
@@ -113,7 +114,7 @@ type Profile = {
   source: string
   content: string           // raw stored sing-box JSON, never rewritten in place
   subscriptionUrl: string | null
-  autoUpdate: boolean
+  autoUpdate: boolean       // toggle with set_profile_auto_update
   updatedAt: number         // epoch seconds
   createdAt: number
   lastError: string | null
@@ -131,6 +132,7 @@ type Settings = {
   connectOnLaunch: boolean
   notifications: boolean
   minimizeToTray: boolean
+  developerMode: boolean    // persisted; default false
   logLevel: string
   subscriptionIntervalHours: number
   language: string

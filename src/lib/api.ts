@@ -97,6 +97,7 @@ export interface Settings {
   logLevel: string;
   subscriptionIntervalHours: number;
   language: string;
+  developerMode: boolean;
 }
 
 export interface Profile {
@@ -268,6 +269,8 @@ export const api = {
     invoke<Profile>("create_profile", { name, content }),
   updateProfile: (id: ProfileId, name: string, content?: string) =>
     invoke<Profile>("update_profile", content === undefined ? { id, name } : { id, name, content }),
+  setProfileAutoUpdate: (id: ProfileId, enabled: boolean) =>
+    invoke<Profile>("set_profile_auto_update", { id, enabled }),
   deleteProfile: (id: ProfileId) => invoke<null>("delete_profile", { id }),
   duplicateProfile: (id: ProfileId, name: string) =>
     invoke<Profile>("duplicate_profile", { id, name }),

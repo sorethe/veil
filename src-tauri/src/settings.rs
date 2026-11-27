@@ -45,6 +45,8 @@ pub struct Settings {
     pub connect_on_launch: bool,
     pub notifications: bool,
     pub minimize_to_tray: bool,
+    #[serde(default)]
+    pub developer_mode: bool,
     pub log_level: String,
     pub subscription_interval_hours: u32,
     pub language: String,
@@ -63,6 +65,7 @@ impl Default for Settings {
             connect_on_launch: false,
             notifications: default_true(),
             minimize_to_tray: false,
+            developer_mode: false,
             log_level: default_log_level(),
             subscription_interval_hours: default_sub_interval(),
             language: default_language(),
@@ -208,6 +211,36 @@ mod tests {
         let raw = fs::read_to_string(dir.join("settings.json")).unwrap();
         assert!(raw.contains("\"mixedPort\": 2100"));
         assert!(store.update(&serde_json::json!({"mixedPort": 0})).is_err());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn developer_mode_defaults_false_and_persists_patch_true() {
+        assert!(!Settings::default().developer_mode);
+
+        let dir = std::env::temp_dir().join(format!("veil-settings-dev-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        fs::write(&path, r#"{"theme":"light"}"#).unwrap();
+
+        let store = SettingsStore::with_path(path.clone());
+        assert_eq!(store.get().theme, "light");
+        assert!(!store.get().developer_mode);
+
+        let updated = store
+            .update(&serde_json::json!({"developerMode": true}))
+            .unwrap();
+        assert!(updated.developer_mode);
+        assert_eq!(
+            serde_json::to_value(&updated).unwrap()["developerMode"],
+            serde_json::json!(true)
+        );
+        assert!(fs::read_to_string(&path)
+            .unwrap()
+            .contains("\"developerMode\": true"));
+
+        let reloaded = SettingsStore::with_path(path);
+        assert!(reloaded.get().developer_mode);
         let _ = fs::remove_dir_all(&dir);
     }
 }

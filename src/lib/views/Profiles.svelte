@@ -11,6 +11,7 @@
   import Modal from "../components/Modal.svelte";
   import ProfileEditor from "../components/ProfileEditor.svelte";
   import ProfileImport from "../components/ProfileImport.svelte";
+  import Toggle from "../components/Toggle.svelte";
   import { errorMessage, formatBytes, formatDateTime, formatRelative, hostOf } from "../format";
   import { app, type View } from "../state.svelte";
 
@@ -27,13 +28,14 @@
   let deleteBusy = $state(false);
   let refreshBusy = $state(false);
   let subscriptionBusy = $state<string | null>(null);
+  let autoUpdateBusy = $state<string | null>(null);
   let counts = $state<Record<string, number | "loading" | { error: string }>>({});
   let countGeneration = 0;
 
   const total = $derived(app.profiles.length);
   const failedWithRuntime = $derived(app.engine.status === "error" && app.engine.pid !== null);
   const autoUpdateNote =
-    "Auto-update is scheduled by the backend. Per-profile scheduling cannot be changed from this build.";
+    "Auto-update refreshes this subscription on the backend schedule. Off keeps the stored config until a manual refresh.";
 
   $effect(() => {
     const signature = app.profiles.map((profile) => `${profile.id}:${profile.updatedAt}`).join("|");
@@ -154,6 +156,24 @@
       app.notify("error", "Subscription refresh failed", errorMessage(error));
     } finally {
       subscriptionBusy = null;
+    }
+  }
+
+  async function setAutoUpdate(profile: Profile, enabled: boolean): Promise<void> {
+    if (autoUpdateBusy || profile.kind !== "subscription") return;
+    autoUpdateBusy = String(profile.id);
+    try {
+      await api.setProfileAutoUpdate(profile.id, enabled);
+      await app.refreshProfiles();
+      app.notify(
+        "success",
+        enabled ? "Auto-update enabled" : "Auto-update disabled",
+        profile.name,
+      );
+    } catch (error) {
+      app.notify("error", "Could not change auto-update", errorMessage(error));
+    } finally {
+      autoUpdateBusy = null;
     }
   }
 
@@ -357,9 +377,16 @@
               <td>
                 {#if profile.kind === "subscription"}
                   <div class="auto-cell" title={autoUpdateNote}>
-                    <span class="tag {profile.autoUpdate ? 'tag--accent' : ''}">
-                      {profile.autoUpdate ? "on" : "off"}
-                    </span>
+                    <Toggle
+                      checked={profile.autoUpdate}
+                      label={`Auto-update ${profile.name}`}
+                      disabled={autoUpdateBusy !== null}
+                      onchange={(next) => void setAutoUpdate(profile, next)}
+                    />
+                    <span class="auto-state mono">{profile.autoUpdate ? "on" : "off"}</span>
+                    {#if autoUpdateBusy === String(profile.id)}
+                      <span class="auto-state mono">saving</span>
+                    {/if}
                   </div>
                 {:else}
                   <span class="faint small">—</span>
@@ -598,6 +625,13 @@
     display: flex;
     align-items: center;
     gap: 6px;
+  }
+
+  .auto-state {
+    font-size: var(--fs-2xs);
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
   }
 
   .row-actions {

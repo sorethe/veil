@@ -28,18 +28,24 @@
       (app.profiles.length ? "No active session" : "No profile"),
   );
   const engineInfo = $derived(app.engineInfo);
-  const coreOk = $derived(app.core?.ok === true && engineInfo?.capabilities.clashApi === true);
-  const coreWarn = $derived(app.core?.ok === true && !coreOk);
-  const coreLabel = $derived(
+  const coreHealth = $derived(
     !app.core
       ? "Core unknown"
       : !app.core.ok
         ? "Core unavailable"
-        : coreWarn
-          ? "Clash API unavailable"
-          : engineInfo?.version ?? app.core.version ?? "Core ready",
+        : !engineInfo
+          ? "Engine unknown"
+          : !engineInfo.capabilities.clashApi
+            ? "Clash API missing"
+            : "Core ready",
   );
-  const corePath = $derived(engineInfo?.path ?? app.core?.path ?? null);
+  const coreDotClass = $derived(
+    coreHealth === "Core ready"
+      ? "core__dot--ok"
+      : coreHealth === "Core unavailable"
+        ? "core__dot--bad"
+        : "core__dot--warn",
+  );
 </script>
 
 <aside class="sidebar" aria-label="Application">
@@ -88,18 +94,12 @@
     <button
       type="button"
       class="core"
-      aria-label="Core status and diagnostics"
-      title={corePath ?? app.core?.error ?? "Core status unknown"}
+      aria-label={`${coreHealth}. Open Diagnostics.`}
+      title={`${coreHealth} · Diagnostics`}
       onclick={() => app.setView("diagnostics")}
     >
-      <span
-        class="core__dot {coreOk ? "core__dot--ok" : app.core && coreWarn ? "core__dot--warn" : app.core ? "core__dot--bad" : ""}"
-        aria-hidden="true"
-      ></span>
-      <span class="core__text">
-        <span class="core__version">{coreLabel}</span>
-        <span class="core__path">{corePath ?? "Path not reported"}</span>
-      </span>
+      <span class="core__dot {coreDotClass}" aria-hidden="true"></span>
+      <span class="core__label">{coreHealth}</span>
     </button>
 
     <div class="foot-actions">
@@ -275,7 +275,7 @@
 
   .core {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     gap: 7px;
     text-align: left;
     padding: 6px 0;
@@ -284,7 +284,7 @@
     min-width: 0;
   }
 
-  .core:hover .core__version {
+  .core:hover .core__label {
     color: var(--text);
   }
 
@@ -293,7 +293,6 @@
     height: 6px;
     border-radius: 50%;
     background: var(--faint);
-    margin-top: 4px;
     flex: none;
   }
 
@@ -309,13 +308,7 @@
     background: var(--error);
   }
 
-  .core__text {
-    display: grid;
-    gap: 1px;
-    min-width: 0;
-  }
-
-  .core__version {
+  .core__label {
     font-family: var(--font-mono);
     font-size: 9px;
     letter-spacing: 0.06em;
@@ -323,16 +316,6 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-  }
-
-  .core__path {
-    font-family: var(--font-mono);
-    font-size: 9px;
-    color: var(--faint);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    text-align: left;
   }
 
   .foot-actions {
@@ -390,7 +373,7 @@
     .nav__index,
     .nav__label,
     .profile-block,
-    .core__text,
+    .core__label,
     .foot-link__label {
       display: none;
     }

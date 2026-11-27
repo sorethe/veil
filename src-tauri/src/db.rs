@@ -203,6 +203,22 @@ impl Db {
             .ok_or_else(|| "profile not found".to_string())
     }
 
+    pub fn set_profile_auto_update(&self, id: i64, enabled: bool) -> Result<Profile, String> {
+        let conn = self.conn.lock().unwrap();
+        let changed = conn
+            .execute(
+                "UPDATE profiles SET auto_update = ?1 WHERE id = ?2",
+                params![enabled as i64, id],
+            )
+            .map_err(|e| e.to_string())?;
+        if changed == 0 {
+            return Err(format!("profile {id} not found"));
+        }
+        drop(conn);
+        self.get_profile(id)?
+            .ok_or_else(|| "profile not found".to_string())
+    }
+
     pub fn delete_profile(&self, id: i64) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM profiles WHERE id = ?1", params![id])
@@ -441,6 +457,32 @@ mod tests {
         db.delete_profile(a.id).unwrap();
         assert_eq!(db.list_profiles().unwrap().len(), 1);
         assert!(db.selections(a.id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn auto_update_toggle_roundtrip() {
+        let db = Db::open_in_memory().unwrap();
+        let p = db
+            .create_profile(
+                "Sub",
+                "subscription",
+                SAMPLE,
+                "https://example.com/sub",
+                Some("https://example.com/sub"),
+                true,
+            )
+            .unwrap();
+        assert!(p.auto_update);
+
+        let off = db.set_profile_auto_update(p.id, false).unwrap();
+        assert!(!off.auto_update);
+        assert!(!db.get_profile(p.id).unwrap().unwrap().auto_update);
+
+        let on = db.set_profile_auto_update(p.id, true).unwrap();
+        assert!(on.auto_update);
+        assert!(db.get_profile(p.id).unwrap().unwrap().auto_update);
+
+        assert!(db.set_profile_auto_update(999_999, true).is_err());
     }
 
     #[test]

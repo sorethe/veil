@@ -408,6 +408,21 @@ async fn update_profile(
 }
 
 #[tauri::command]
+async fn set_profile_auto_update(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: i64,
+    enabled: bool,
+) -> Result<Profile, CommandError> {
+    let profile = state
+        .db
+        .set_profile_auto_update(id, enabled)
+        .map_err(CommandError::from)?;
+    emit_profiles(&app, &state.db);
+    Ok(profile)
+}
+
+#[tauri::command]
 async fn delete_profile(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -894,6 +909,7 @@ pub fn run() {
             list_profiles,
             create_profile,
             update_profile,
+            set_profile_auto_update,
             delete_profile,
             duplicate_profile,
             import_json,
