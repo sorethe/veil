@@ -107,7 +107,9 @@ pub fn find_core(explicit: Option<&str>, resource_dir: Option<&Path>) -> Option<
     candidates.into_iter().find(|p| is_executable(p))
 }
 
-pub fn version(core: &Path) -> Result<String, String> {
+/// Real binary probe: version string plus build tags (used for capability
+/// detection such as `with_clash_api`). Never hardcodes features.
+pub fn probe(core: &Path) -> Result<(String, Vec<String>), String> {
     let output = Command::new(core)
         .arg("version")
         .output()
@@ -117,16 +119,139 @@ pub fn version(core: &Path) -> Result<String, String> {
         return Err(format!("sing-box version failed: {}", err.trim()));
     }
     let text = String::from_utf8_lossy(&output.stdout);
+    let mut version = None;
+    let mut tags = Vec::new();
     for line in text.lines() {
-        if let Some(rest) = line.trim().strip_prefix("sing-box version") {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("sing-box version") {
             let v = rest.trim().split_whitespace().next().unwrap_or("").to_string();
             if !v.is_empty() {
-                return Ok(v);
+                version = Some(v);
             }
+        } else if let Some(rest) = trimmed.strip_prefix("Tags:") {
+            tags = rest
+                .split(',')
+                .map(str::trim)
+                .filter(|tag| !tag.is_empty())
+                .map(str::to_string)
+                .collect();
         }
     }
-    Err("could not parse sing-box version output".into())
+    match version {
+        Some(version) => Ok((version, tags)),
+        None => Err("could not parse sing-box version output".into()),
+    }
 }
+
+pub fn version(core: &Path) -> Result<String, String> {
+    probe(core).map(|(version, _)| version)
+}
+
+#[derive(Clone, Debug, Serialize, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct EngineCapabilities {
+    pub clash_api: bool,
+    pub tun: bool,
+    pub auto_route: bool,
+    pub auto_redirect: bool,
+    pub nftables: bool,
+    pub ipv6: bool,
+    pub dns_hijack: bool,
+    pub system_proxy_backends: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EngineInfo {
+    pub id: String,
+    pub version: Option<String>,
+    pub path: Option<String>,
+    pub api: String,
+    pub capabilities: EngineCapabilities,
+}
+
+impl Default for EngineInfo {
+    fn default() -> Self {
+        Self {
+            id: "sing-box".into(),
+            version: None,
+            path: None,
+            api: "clash".into(),
+            capabilities: EngineCapabilities::default(),
+        }
+    }
+}
+
+fn command_exists(name: &str) -> bool {
+    which(name).is_some()
+}
+
+fn ipv6_enabled() -> bool {
+    let disabled = fs::read_to_string("/proc/sys/net/ipv6/conf/all/disable_ipv6")
+        .map(|value| value.trim() != "0")
+        .unwrap_or(false);
+    if disabled {
+        return false;
+    }
+    Path::new("/proc/net/if_inet6").exists()
+}
+
+fn version_at_least(version: &str, minimum: &str) -> bool {
+    fn parts(value: &str) -> Vec<u64> {
+        value
+            .split(|c: char| !c.is_ascii_digit())
+            .filter(|part| !part.is_empty())
+            .filter_map(|part| part.parse::<u64>().ok())
+            .collect()
+    }
+    let current = parts(version);
+    let minimum = parts(minimum);
+    for index in 0..minimum.len().max(current.len()) {
+        let a = current.get(index).copied().unwrap_or(0);
+        let b = minimum.get(index).copied().unwrap_or(0);
+        if a != b {
+            return a > b;
+        }
+    }
+    true
+}
+
+/// Capabilities derived from the real binary tags, the presence of
+/// /dev/net/tun, nft/ip tooling, IPv6 support and available desktop proxy CLIs.
+pub fn capabilities_for(core: Option<&Path>) -> EngineCapabilities {
+    let mut capabilities = EngineCapabilities {
+        nftables: command_exists("nft"),
+        ipv6: ipv6_enabled(),
+        system_proxy_backends: crate::sysproxy::available_backends(),
+        ..EngineCapabilities::default()
+    };
+    let Some(core) = core else {
+        return capabilities;
+    };
+    let (version, tags) = probe(core).unwrap_or_default();
+    let tun_device = Path::new("/dev/net/tun").exists();
+    capabilities.tun = cfg!(target_os = "linux") && tun_device;
+    capabilities.clash_api = tags.iter().any(|tag| tag == "with_clash_api");
+    capabilities.auto_route = capabilities.tun && command_exists("ip");
+    capabilities.auto_redirect = capabilities.tun && capabilities.nftables;
+    capabilities.dns_hijack =
+        capabilities.tun && version_at_least(&version, "1.10") && !version.is_empty();
+    capabilities
+}
+
+pub fn engine_info(explicit: Option<&str>, resource_dir: Option<&Path>) -> EngineInfo {
+    let core_path = find_core(explicit, resource_dir);
+    let version = core_path.as_deref().and_then(|path| probe(path).ok()).map(|(v, _)| v);
+    let capabilities = capabilities_for(core_path.as_deref());
+    EngineInfo {
+        id: "sing-box".into(),
+        version,
+        path: core_path.map(|path| path.to_string_lossy().into_owned()),
+        api: "clash".into(),
+        capabilities,
+    }
+}
+
 
 pub fn info(explicit: Option<&str>, resource_dir: Option<&Path>) -> CoreInfo {
     let Some(path) = find_core(explicit, resource_dir) else {
@@ -238,4 +363,66 @@ pub fn is_executable_public(path: &Path) -> bool {
 
 pub fn file_uid(path: &Path) -> Option<u32> {
     fs::metadata(path).ok().map(|m| m.uid())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn engine_info_serializes_contract_shape() {
+        let info = engine_info(None, None);
+        let value = serde_json::to_value(&info).unwrap();
+        assert_eq!(value["id"], "sing-box");
+        assert_eq!(value["api"], "clash");
+        for key in [
+            "clashApi",
+            "tun",
+            "autoRoute",
+            "autoRedirect",
+            "nftables",
+            "ipv6",
+            "dnsHijack",
+            "systemProxyBackends",
+        ] {
+            assert!(
+                value["capabilities"].get(key).is_some(),
+                "missing capability {key}"
+            );
+        }
+        assert!(value["capabilities"]["systemProxyBackends"].is_array());
+        // If a real core was found, version/path come from the binary and
+        // clashApi is derived from its build tags rather than hardcoded.
+        if let Some(path) = &info.path {
+            assert!(Path::new(path).is_file());
+            if let Ok((_, tags)) = probe(Path::new(path)) {
+                assert_eq!(
+                    info.capabilities.clash_api,
+                    tags.iter().any(|tag| tag == "with_clash_api")
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn capabilities_are_derived_from_the_binary() {
+        let Ok(path) = std::env::var("VEIL_SINGBOX") else {
+            return;
+        };
+        let capabilities = capabilities_for(Some(Path::new(&path)));
+        assert!(capabilities.clash_api, "vendored sing-box has with_clash_api");
+        assert!(capabilities.tun, "/dev/net/tun exists on this host");
+        assert_eq!(
+            capabilities.auto_redirect,
+            capabilities.tun && capabilities.nftables
+        );
+    }
+
+    #[test]
+    fn version_compare_handles_numeric_segments() {
+        assert!(version_at_least("1.14.5", "1.10"));
+        assert!(version_at_least("2.0.0", "1.99.99"));
+        assert!(!version_at_least("1.9.9", "1.10"));
+        assert!(version_at_least("1.10.0", "1.10"));
+    }
 }

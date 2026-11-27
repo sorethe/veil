@@ -17,7 +17,7 @@ pub struct LinkImport {
     pub config: Value,
 }
 
-const SHADOWSOCKS_METHODS: [&str; 8] = [
+const SHADOWSOCKS_METHODS: [&str; 9] = [
     "none",
     "aes-128-gcm",
     "aes-192-gcm",
@@ -26,6 +26,7 @@ const SHADOWSOCKS_METHODS: [&str; 8] = [
     "xchacha20-ietf-poly1305",
     "2022-blake3-aes-128-gcm",
     "2022-blake3-aes-256-gcm",
+    "2022-blake3-chacha20-poly1305",
 ];
 
 fn decode_percent(input: &str) -> String {

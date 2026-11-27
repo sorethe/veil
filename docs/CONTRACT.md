@@ -3,19 +3,44 @@
 This file is the coordination artifact between the Rust backend (`src-tauri/`) and
 the Svelte UI (`src/`). The backend implements exactly these commands and events.
 
-- Every command is `async` on the Rust side and returns `Result<T, String>`.
+- Every command is `async` on the Rust side and returns
+  `Result<T, CommandError>`. Command rejections are always the typed envelope
+  below; the backend never returns a bare string.
 - Command **names** are snake_case; command **arguments** are camelCase (Tauri 2
   default). Example: `invoke("connect", { profileId: 3, mode: "tun" })`.
 - Optional arguments may be `null`/omitted.
-- Rejections carry a human-readable error string. The UI should display it; the
-  backend never fabricates success.
 - All JSON is camelCase. Timestamps are epoch seconds unless stated otherwise.
+- **Events are the only source of live engine truth.** `engine://state` is the
+  canonical lifecycle stream; polling `get_state` is a snapshot, not a live
+  feed.
+
+## Command errors
+
+```ts
+type CommandError = {
+  code:
+    | 'not-ready'      // engine/API required but not connected or still busy
+    | 'validation'     // profile/config/settings/link input rejected
+    | 'permission'     // polkit/pkexec/root/TUN permission failure
+    | 'engine'         // process lifecycle or Clash API failure
+    | 'network'        // subscription HTTP/DNS/transport failure
+    | 'io'             // filesystem, SQLite, export/import I/O failure
+    | 'unsupported'    // feature/backend/tool is not available here
+    | 'unknown'
+  message: string      // original human-readable message, never rewritten
+  detail: string | null // optional extra context (e.g. stderr tail)
+}
+```
+
+Frontend handling: read `error.message` for display and switch on `error.code`
+for behavior. Older builds returned strings; the frontend may defensively
+normalize those, but this backend only emits the envelope.
 
 ## Commands
 
 | Command | Arguments | Returns |
 |---|---|---|
-| `bootstrap` | – | `{settings, profiles, engine, core, platform, version}` |
+| `bootstrap` | – | `{settings, profiles, engine, core, engineInfo, platform, version}` |
 | `get_state` | – | `EngineState` |
 | `connect` | `mode?: 'system'\|'tun'`, `profileId?: number` | `EngineState` |
 | `disconnect` | – | `EngineState` |
@@ -51,8 +76,9 @@ the Svelte UI (`src/`). The backend implements exactly these commands and events
 | `set_autostart` | `enabled: boolean` | `boolean` |
 | `quit` | – | `null` |
 
-`bootstrap.core` is the same shape as `CoreInfo` below. `bootstrap.core` error is
-non-null when the core is missing or unusable. `bootstrap.version` is the Veil
+`bootstrap.core` is the same shape as `CoreInfo` below (retained for
+compatibility). `bootstrap.engineInfo` is the authoritative typed engine
+description and capability set described below. `bootstrap.version` is the Veil
 version string.
 
 ## Data shapes
@@ -159,8 +185,28 @@ type RouteInfo = {
 
 type CoreInfo = { path: string | null; version: string | null; ok: boolean; error: string | null }
 
+type EngineCapabilities = {
+  clashApi: boolean              // binary build tags include with_clash_api
+  tun: boolean                   // /dev/net/tun present on Linux + core found
+  autoRoute: boolean             // tun + ip tooling available
+  autoRedirect: boolean          // tun + nftables available
+  nftables: boolean              // nft binary present (environment)
+  ipv6: boolean                  // IPv6 enabled on this host
+  dnsHijack: boolean             // tun + sing-box >= 1.10 supports dns_mode
+  systemProxyBackends: string[]  // available CLI backends: gnome|kde|xfce
+}
+
+type EngineInfo = {
+  id: 'sing-box'
+  version: string | null         // from `sing-box version`; null if no binary
+  path: string | null            // resolved core path; null if no binary
+  api: 'clash'
+  capabilities: EngineCapabilities
+}
+
 type Diagnostics = {
   core: CoreInfo
+  capabilities: EngineCapabilities
   permissions: { user: string; helper: boolean; polkit: boolean; tunDevice: boolean; nft: boolean; root: boolean }
   interfaces: { name: string; addresses: string[]; up: boolean; default: boolean }[]
   tun: { present: boolean; name: string | null }
@@ -183,6 +229,38 @@ type Platform = {
 }
 ```
 
+## Engine lifecycle
+
+`engine://state` is the canonical lifecycle event. Every payload is a complete
+`EngineState`. Statuses and allowed transitions:
+
+| Status | Meaning | Allowed next states |
+|---|---|---|
+| `idle` | no engine; no polling | `starting` (connect) |
+| `starting` | config checked, process spawned, waiting for health | `connected`, `error` |
+| `connected` | Clash API `/version` health check passed | `stopping` (disconnect), `error` (unexpected exit) |
+| `stopping` | SIGTERM/helper stop in progress | `idle`, `error` (stop failed; pid retained) |
+| `error` | startup/health/exit/stop failure | `starting` (only when no engine process remains), `stopping` (disconnect retry) |
+
+Rules:
+
+- `connected` is **only** emitted after a real Clash API `/version` health check
+  (12s limit) against the spawned engine. A spawned process alone is `starting`.
+- Spawn/health failures kill the process, emit `engine://state` with `error` and
+  the stderr tail, and emit `engine://notice`.
+- Unexpected child exit while `connected` emits `error`, restores the desktop
+  proxy, clears runtime state and emits a notice.
+- `disconnect` emits `stopping`, then `idle` after SIGTERM (8s) or helper stop,
+  proxy restore and runtime cleanup. If stopping fails, status becomes `error`
+  and the pid/runtime state is retained so the UI can retry.
+- Adoption on app restart: the backend reads `runtime/runtime.json`, verifies
+  the pid is alive and `/proc/<pid>/cmdline` belongs to sing-box with that exact
+  config, verifies the Clash API with the stored secret, then emits `connected`
+  and reattaches stats/log/monitor tasks. Otherwise it cleans the runtime files,
+  restores any leftover desktop proxy and stays `idle`.
+- Live stats arrive only via `engine://stats` (once per second while connected);
+  logs via `engine://log`; user notices via `engine://notice`.
+
 ## Events
 
 | Event | Payload |
@@ -195,8 +273,8 @@ type Platform = {
 
 ## Notes the UI can rely on
 
-- `EngineState.status` is the only authority on engine state. `connect` resolves
-  `connected` only after a real Clash API health check.
+- `engine://state` is the only authority on engine state (see lifecycle above).
+  `connect` resolves `connected` only after a real Clash API health check.
 - Stats are only produced by sing-box's Clash API. When idle, `get_stats`
   returns cached zeros and `duration: 0`; nothing is polled when idle.
 - `proxy.kind` values: `gnome`, `kde`, `xfce`, `tun`, `unsupported`, `error`.
@@ -221,4 +299,11 @@ type Platform = {
   invalid values are rejected.
 - `set_autostart` writes `~/.config/autostart/veil.desktop` and also updates the
   `autostart` setting.
+- `engineInfo.capabilities` is derived from actual detection (binary tags,
+  `/dev/net/tun`, `nft`, `ip`, IPv6 sysctls, available proxy CLIs). It is never
+  hardcoded. `systemProxyBackends` lists mechanisms whose tools exist;
+  `platform.systemProxyKind` says which one will actually be used for this
+  desktop.
+- Profile `id` values are JSON numbers (`number`), matching the SQLite row id.
+  Frontend code must not send them as strings.
 - No global shortcuts exist on Wayland. The UI must not show any.

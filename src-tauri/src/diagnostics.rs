@@ -1,4 +1,4 @@
-use crate::core::CoreInfo;
+use crate::core::{CoreInfo, EngineCapabilities};
 use crate::logs::LogStore;
 use crate::sysproxy;
 use serde::Serialize;
@@ -62,6 +62,7 @@ pub struct HelperInfo {
 #[serde(rename_all = "camelCase")]
 pub struct Diagnostics {
     pub core: CoreInfo,
+    pub capabilities: EngineCapabilities,
     pub permissions: Permissions,
     pub interfaces: Vec<InterfaceInfo>,
     pub tun: TunInfo,
@@ -319,6 +320,7 @@ pub fn run(
         }
     }
 
+    let capabilities = crate::core::capabilities_for(core.path.as_deref().map(Path::new));
     let (tray_available, tray_detail) = sysproxy::tray_available();
 
     let mut errors: Vec<String> = logs.tail_lines(5, Some("error"));
@@ -351,6 +353,7 @@ pub fn run(
 
     Diagnostics {
         core,
+        capabilities,
         permissions: Permissions {
             user,
             helper: helper.installed,
@@ -411,6 +414,7 @@ mod tests {
         let json = serde_json::to_value(&diag).unwrap();
         for key in [
             "core",
+            "capabilities",
             "permissions",
             "interfaces",
             "tun",

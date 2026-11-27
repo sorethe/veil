@@ -105,6 +105,22 @@ pub fn proxy_kind_from_desktop(desktop: &str) -> String {
     "unsupported".into()
 }
 
+/// Desktop proxy mechanisms whose CLI tooling is actually present. This is
+/// tool availability, not a claim that the active desktop applies them.
+pub fn available_backends() -> Vec<String> {
+    let mut backends = Vec::new();
+    if command_exists("gsettings") {
+        backends.push("gnome".to_string());
+    }
+    if command_exists("kwriteconfig6") || command_exists("kwriteconfig5") {
+        backends.push("kde".to_string());
+    }
+    if command_exists("xfconf-query") {
+        backends.push("xfce".to_string());
+    }
+    backends
+}
+
 pub fn system_proxy_kind() -> String {
     let kind = proxy_kind_from_desktop(&desktop_raw());
     match kind.as_str() {

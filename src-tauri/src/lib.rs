@@ -3,6 +3,7 @@ pub mod configgen;
 pub mod core;
 pub mod db;
 pub mod diagnostics;
+pub mod errors;
 pub mod engine;
 pub mod links;
 pub mod logs;
@@ -16,6 +17,7 @@ use base64::Engine as _;
 use clash::{Conn, Outbound, RouteInfo};
 use db::{Db, Profile};
 use engine::{Engine, EngineState, Stats};
+use errors::CommandError;
 use logs::{LogEntry, LogStore};
 use serde_json::{json, Value};
 use settings::{Settings, SettingsStore};
@@ -238,35 +240,42 @@ fn import_links_profile(
     name: &str,
     text: &str,
     source: &str,
-) -> Result<Profile, String> {
-    let content = links::links_to_config_json(text)?;
-    validate_profile_content(&state.settings.get(), state.resource_dir.as_deref(), &content)?;
+) -> Result<Profile, CommandError> {
+    let content = links::links_to_config_json(text).map_err(CommandError::from)?;
+    validate_profile_content(&state.settings.get(), state.resource_dir.as_deref(), &content)
+        .map_err(CommandError::validation)?;
     let profile = state
         .db
-        .create_profile(name, "links", &content, source, None, false)?;
+        .create_profile(name, "links", &content, source, None, false)
+        .map_err(CommandError::io)?;
     emit_profiles(app, &state.db);
     Ok(profile)
 }
 
 #[tauri::command]
-async fn bootstrap(state: State<'_, AppState>) -> Result<Value, String> {
+async fn bootstrap(state: State<'_, AppState>) -> Result<Value, CommandError> {
     let settings = state.settings.get();
-    let profiles = state.db.list_profiles()?;
+    let profiles = state
+        .db
+        .list_profiles()
+        .map_err(CommandError::io)?;
     let engine = state.engine.snapshot();
     let core_info = core::info(settings.core_path.as_deref(), state.resource_dir.as_deref());
+    let engine_info = core::engine_info(settings.core_path.as_deref(), state.resource_dir.as_deref());
     let platform = sysproxy::platform_info();
     Ok(json!({
         "settings": settings,
         "profiles": profiles,
         "engine": engine,
         "core": core_info,
+        "engineInfo": engine_info,
         "platform": platform,
         "version": env!("CARGO_PKG_VERSION")
     }))
 }
 
 #[tauri::command]
-async fn get_state(state: State<'_, AppState>) -> Result<EngineState, String> {
+async fn get_state(state: State<'_, AppState>) -> Result<EngineState, CommandError> {
     Ok(state.engine.snapshot())
 }
 
@@ -275,57 +284,57 @@ async fn connect(
     state: State<'_, AppState>,
     mode: Option<String>,
     profile_id: Option<i64>,
-) -> Result<EngineState, String> {
-    state.engine.connect(mode, profile_id).await
+) -> Result<EngineState, CommandError> {
+    state.engine.connect(mode, profile_id).await.map_err(CommandError::from_engine)
 }
 
 #[tauri::command]
-async fn disconnect(state: State<'_, AppState>) -> Result<EngineState, String> {
-    state.engine.disconnect().await
+async fn disconnect(state: State<'_, AppState>) -> Result<EngineState, CommandError> {
+    state.engine.disconnect().await.map_err(CommandError::from_engine)
 }
 
 #[tauri::command]
-async fn get_stats(state: State<'_, AppState>) -> Result<Stats, String> {
+async fn get_stats(state: State<'_, AppState>) -> Result<Stats, CommandError> {
     Ok(state.engine.stats())
 }
 
 #[tauri::command]
-async fn get_connections(state: State<'_, AppState>) -> Result<Vec<Conn>, String> {
-    state.engine.connections().await
+async fn get_connections(state: State<'_, AppState>) -> Result<Vec<Conn>, CommandError> {
+    state.engine.connections().await.map_err(CommandError::from_engine)
 }
 
 #[tauri::command]
-async fn close_connection(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    state.engine.close_connection(&id).await
+async fn close_connection(state: State<'_, AppState>, id: String) -> Result<(), CommandError> {
+    state.engine.close_connection(&id).await.map_err(CommandError::from_engine)
 }
 
 #[tauri::command]
 async fn get_logs(
     state: State<'_, AppState>,
     since_seq: Option<u64>,
-) -> Result<Vec<LogEntry>, String> {
+) -> Result<Vec<LogEntry>, CommandError> {
     Ok(state.engine.logs.snapshot(since_seq))
 }
 
 #[tauri::command]
-async fn clear_logs(state: State<'_, AppState>) -> Result<(), String> {
+async fn clear_logs(state: State<'_, AppState>) -> Result<(), CommandError> {
     state.engine.logs.clear();
     Ok(())
 }
 
 #[tauri::command]
-async fn export_logs(state: State<'_, AppState>) -> Result<String, String> {
-    state.engine.logs.export()
+async fn export_logs(state: State<'_, AppState>) -> Result<String, CommandError> {
+    state.engine.logs.export().map_err(CommandError::from)
 }
 
 #[tauri::command]
-async fn get_route(state: State<'_, AppState>) -> Result<RouteInfo, String> {
-    state.engine.route().await
+async fn get_route(state: State<'_, AppState>) -> Result<RouteInfo, CommandError> {
+    state.engine.route().await.map_err(CommandError::from_engine)
 }
 
 #[tauri::command]
-async fn get_outbounds(state: State<'_, AppState>) -> Result<Vec<Outbound>, String> {
-    state.engine.outbounds().await
+async fn get_outbounds(state: State<'_, AppState>) -> Result<Vec<Outbound>, CommandError> {
+    state.engine.outbounds().await.map_err(CommandError::from_engine)
 }
 
 #[tauri::command]
@@ -333,23 +342,32 @@ async fn select_outbound(
     state: State<'_, AppState>,
     group: String,
     tag: String,
-) -> Result<(), String> {
-    state.engine.select_outbound(&group, &tag).await
+) -> Result<(), CommandError> {
+    state.engine.select_outbound(&group, &tag).await.map_err(CommandError::from_engine)
 }
 
 #[tauri::command]
-async fn test_delay(state: State<'_, AppState>, tag: String) -> Result<u64, String> {
-    state.engine.test_delay(&tag).await
+async fn test_delay(state: State<'_, AppState>, tag: String) -> Result<u64, CommandError> {
+    state.engine.test_delay(&tag).await.map_err(CommandError::from_engine)
 }
 
 #[tauri::command]
-async fn set_clash_mode(state: State<'_, AppState>, mode: String) -> Result<(), String> {
-    state.engine.set_clash_mode(&mode).await
+async fn set_clash_mode(state: State<'_, AppState>, mode: String) -> Result<(), CommandError> {
+    if !matches!(mode.as_str(), "rule" | "global" | "direct") {
+        return Err(CommandError::validation(format!(
+            "unknown clash mode '{mode}' (expected rule, global or direct)"
+        )));
+    }
+    state
+        .engine
+        .set_clash_mode(&mode)
+        .await
+        .map_err(CommandError::from_engine)
 }
 
 #[tauri::command]
-async fn list_profiles(state: State<'_, AppState>) -> Result<Vec<Profile>, String> {
-    state.db.list_profiles()
+async fn list_profiles(state: State<'_, AppState>) -> Result<Vec<Profile>, CommandError> {
+    state.db.list_profiles().map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -358,11 +376,13 @@ async fn create_profile(
     state: State<'_, AppState>,
     name: String,
     content: String,
-) -> Result<Profile, String> {
-    validate_profile_content(&state.settings.get(), state.resource_dir.as_deref(), &content)?;
+) -> Result<Profile, CommandError> {
+    validate_profile_content(&state.settings.get(), state.resource_dir.as_deref(), &content)
+        .map_err(CommandError::validation)?;
     let profile = state
         .db
-        .create_profile(&name, "local", &content, "manual", None, false)?;
+        .create_profile(&name, "local", &content, "manual", None, false)
+        .map_err(CommandError::io)?;
     emit_profiles(&app, &state.db);
     Ok(profile)
 }
@@ -374,11 +394,15 @@ async fn update_profile(
     id: i64,
     name: String,
     content: Option<String>,
-) -> Result<Profile, String> {
+) -> Result<Profile, CommandError> {
     if let Some(content) = &content {
-        validate_profile_content(&state.settings.get(), state.resource_dir.as_deref(), content)?;
+        validate_profile_content(&state.settings.get(), state.resource_dir.as_deref(), content)
+            .map_err(CommandError::validation)?;
     }
-    let profile = state.db.update_profile(id, &name, content.as_deref())?;
+    let profile = state
+        .db
+        .update_profile(id, &name, content.as_deref())
+        .map_err(CommandError::from)?;
     emit_profiles(&app, &state.db);
     Ok(profile)
 }
@@ -388,8 +412,8 @@ async fn delete_profile(
     app: AppHandle,
     state: State<'_, AppState>,
     id: i64,
-) -> Result<(), String> {
-    state.db.delete_profile(id)?;
+) -> Result<(), CommandError> {
+    state.db.delete_profile(id).map_err(CommandError::from)?;
     emit_profiles(&app, &state.db);
     Ok(())
 }
@@ -400,8 +424,11 @@ async fn duplicate_profile(
     state: State<'_, AppState>,
     id: i64,
     name: String,
-) -> Result<Profile, String> {
-    let profile = state.db.duplicate_profile(id, &name)?;
+) -> Result<Profile, CommandError> {
+    let profile = state
+        .db
+        .duplicate_profile(id, &name)
+        .map_err(CommandError::from)?;
     emit_profiles(&app, &state.db);
     Ok(profile)
 }
@@ -413,12 +440,14 @@ async fn import_json(
     name: String,
     content: String,
     source: Option<String>,
-) -> Result<Profile, String> {
-    validate_profile_content(&state.settings.get(), state.resource_dir.as_deref(), &content)?;
+) -> Result<Profile, CommandError> {
+    validate_profile_content(&state.settings.get(), state.resource_dir.as_deref(), &content)
+        .map_err(CommandError::validation)?;
     let source = source.unwrap_or_else(|| "inline".into());
     let profile = state
         .db
-        .create_profile(&name, "local", &content, &source, None, false)?;
+        .create_profile(&name, "local", &content, &source, None, false)
+        .map_err(CommandError::io)?;
     emit_profiles(&app, &state.db);
     Ok(profile)
 }
@@ -429,21 +458,20 @@ async fn import_subscription(
     state: State<'_, AppState>,
     url: String,
     name: Option<String>,
-) -> Result<Profile, String> {
+) -> Result<Profile, CommandError> {
     state.engine.logs.add_secret(&url);
-    let content = fetch_subscription(&url).await?;
-    validate_profile_content(&state.settings.get(), state.resource_dir.as_deref(), &content)?;
+    let content = fetch_subscription(&url)
+        .await
+        .map_err(CommandError::network)?;
+    validate_profile_content(&state.settings.get(), state.resource_dir.as_deref(), &content)
+        .map_err(CommandError::validation)?;
     let name = name
         .filter(|n| !n.trim().is_empty())
         .unwrap_or_else(|| derive_subscription_name(&url));
-    let profile = state.db.create_profile(
-        &name,
-        "subscription",
-        &content,
-        &url,
-        Some(&url),
-        true,
-    )?;
+    let profile = state
+        .db
+        .create_profile(&name, "subscription", &content, &url, Some(&url), true)
+        .map_err(CommandError::io)?;
     emit_profiles(&app, &state.db);
     Ok(profile)
 }
@@ -453,15 +481,18 @@ async fn refresh_subscription(
     app: AppHandle,
     state: State<'_, AppState>,
     id: i64,
-) -> Result<Profile, String> {
+) -> Result<Profile, CommandError> {
     let profile = state
         .db
-        .get_profile(id)?
-        .ok_or_else(|| format!("profile {id} not found"))?;
-    let url = profile
-        .subscription_url
-        .clone()
-        .ok_or_else(|| format!("profile '{}' has no subscription URL", profile.name))?;
+        .get_profile(id)
+        .map_err(CommandError::io)?
+        .ok_or_else(|| CommandError::validation(format!("profile {id} not found")))?;
+    let url = profile.subscription_url.clone().ok_or_else(|| {
+        CommandError::validation(format!(
+            "profile '{}' has no subscription URL",
+            profile.name
+        ))
+    })?;
     state.engine.logs.add_secret(&url);
     let result = async {
         let content = fetch_subscription(&url).await?;
@@ -478,7 +509,7 @@ async fn refresh_subscription(
         Err(error) => {
             let _ = state.db.set_subscription_result(id, None, Some(&error));
             emit_profiles(&app, &state.db);
-            Err(error)
+            Err(CommandError::from(error))
         }
     }
 }
@@ -489,7 +520,7 @@ async fn import_share_links(
     state: State<'_, AppState>,
     name: String,
     text: String,
-) -> Result<Profile, String> {
+) -> Result<Profile, CommandError> {
     import_links_profile(&app, &state, &name, &text, "share-links")
 }
 
@@ -499,9 +530,10 @@ async fn import_qr(
     state: State<'_, AppState>,
     image_base64: String,
     name: Option<String>,
-) -> Result<Profile, String> {
-    let zbar = diagnostics::find_in_path("zbarimg")
-        .ok_or_else(|| "zbarimg is not installed; QR import is unavailable".to_string())?;
+) -> Result<Profile, CommandError> {
+    let zbar = diagnostics::find_in_path("zbarimg").ok_or_else(|| {
+        CommandError::unsupported("zbarimg is not installed; QR import is unavailable")
+    })?;
     let payload = image_base64
         .split_once(',')
         .map(|(_, rest)| rest)
@@ -531,18 +563,18 @@ async fn import_qr(
     let _ = fs::remove_file(&path);
     let output = match output {
         Ok(Ok(output)) => output,
-        Ok(Err(e)) => return Err(format!("run zbarimg: {e}")),
-        Err(_) => return Err("zbarimg timed out after 10s".into()),
+        Ok(Err(e)) => return Err(CommandError::io(format!("run zbarimg: {e}"))),
+        Err(_) => return Err(CommandError::io("zbarimg timed out after 10s")),
     };
     if !output.status.success() {
-        return Err(format!(
+        return Err(CommandError::validation(format!(
             "QR decode failed: {}",
             String::from_utf8_lossy(&output.stderr).trim()
-        ));
+        )));
     }
     let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
     if text.is_empty() {
-        return Err("no QR content detected in the image".into());
+        return Err(CommandError::validation("no QR content detected in the image"));
     }
     let name = name
         .filter(|n| !n.trim().is_empty())
@@ -551,7 +583,7 @@ async fn import_qr(
 }
 
 #[tauri::command]
-async fn validate_content(state: State<'_, AppState>, content: String) -> Result<Value, String> {
+async fn validate_content(state: State<'_, AppState>, content: String) -> Result<Value, CommandError> {
     match validate_profile_content(
         &state.settings.get(),
         state.resource_dir.as_deref(),
@@ -563,9 +595,9 @@ async fn validate_content(state: State<'_, AppState>, content: String) -> Result
 }
 
 #[tauri::command]
-async fn export_profiles(state: State<'_, AppState>) -> Result<String, String> {
-    paths::ensure_dirs().map_err(|e| e.to_string())?;
-    let backup = state.db.export_backup()?;
+async fn export_profiles(state: State<'_, AppState>) -> Result<String, CommandError> {
+    paths::ensure_dirs().map_err(|e| CommandError::io(e.to_string()))?;
+    let backup = state.db.export_backup().map_err(CommandError::io)?;
     let raw = serde_json::to_string_pretty(&backup).map_err(|e| e.to_string())?;
     let path = paths::exports_dir().join(format!(
         "veil-profiles-{}-{}.json",
@@ -588,14 +620,17 @@ async fn import_backup(
     app: AppHandle,
     state: State<'_, AppState>,
     content: String,
-) -> Result<usize, String> {
-    let count = state.db.import_backup(&content)?;
+) -> Result<usize, CommandError> {
+    let count = state
+        .db
+        .import_backup(&content)
+        .map_err(CommandError::from)?;
     emit_profiles(&app, &state.db);
     Ok(count)
 }
 
 #[tauri::command]
-async fn get_settings(state: State<'_, AppState>) -> Result<Settings, String> {
+async fn get_settings(state: State<'_, AppState>) -> Result<Settings, CommandError> {
     Ok(state.settings.get())
 }
 
@@ -603,17 +638,17 @@ async fn get_settings(state: State<'_, AppState>) -> Result<Settings, String> {
 async fn update_settings(
     state: State<'_, AppState>,
     patch: Value,
-) -> Result<Settings, String> {
+) -> Result<Settings, CommandError> {
     let before = state.settings.get();
-    let after = state.settings.update(&patch)?;
+    let after = state.settings.update(&patch).map_err(CommandError::validation)?;
     if before.autostart != after.autostart {
-        write_autostart(after.autostart)?;
+        write_autostart(after.autostart).map_err(CommandError::io)?;
     }
     Ok(after)
 }
 
 #[tauri::command]
-async fn run_diagnostics(state: State<'_, AppState>) -> Result<diagnostics::Diagnostics, String> {
+async fn run_diagnostics(state: State<'_, AppState>) -> Result<diagnostics::Diagnostics, CommandError> {
     let settings = state.settings.get();
     let core_info = core::info(settings.core_path.as_deref(), state.resource_dir.as_deref());
     let active = state.engine.active_profile_content();
@@ -626,7 +661,7 @@ async fn run_diagnostics(state: State<'_, AppState>) -> Result<diagnostics::Diag
 }
 
 #[tauri::command]
-async fn read_clipboard() -> Result<String, String> {
+async fn read_clipboard() -> Result<String, CommandError> {
     if let Ok(Ok(output)) = tokio::time::timeout(
         Duration::from_secs(3),
         tokio::process::Command::new("wl-paste")
@@ -651,12 +686,12 @@ async fn read_clipboard() -> Result<String, String> {
             return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
         }
     }
-    Err("could not read the clipboard (tried wl-paste and xclip)".into())
+    Err(CommandError::unsupported("could not read the clipboard (tried wl-paste and xclip)"))
 }
 
 #[tauri::command]
-async fn open_config_dir() -> Result<(), String> {
-    paths::ensure_dirs().map_err(|e| e.to_string())?;
+async fn open_config_dir() -> Result<(), CommandError> {
+    paths::ensure_dirs().map_err(|e| CommandError::io(e.to_string()))?;
     let dir = paths::config_dir();
     let dir_str = dir.to_string_lossy().into_owned();
     if std::process::Command::new("xdg-open")
@@ -673,20 +708,20 @@ async fn open_config_dir() -> Result<(), String> {
     {
         return Ok(());
     }
-    Err("no file manager opener found (tried xdg-open and gio)".into())
+    Err(CommandError::unsupported("no file manager opener found (tried xdg-open and gio)"))
 }
 
 #[tauri::command]
-async fn set_autostart(state: State<'_, AppState>, enabled: bool) -> Result<bool, String> {
-    let result = write_autostart(enabled)?;
+async fn set_autostart(state: State<'_, AppState>, enabled: bool) -> Result<bool, CommandError> {
+    let result = write_autostart(enabled).map_err(CommandError::io)?;
     if let Err(e) = state.settings.update(&json!({ "autostart": enabled })) {
-        return Err(format!("autostart file written but settings update failed: {e}"));
+        return Err(CommandError::io(format!("autostart file written but settings update failed: {e}")));
     }
     Ok(result)
 }
 
 #[tauri::command]
-async fn quit(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+async fn quit(app: AppHandle, state: State<'_, AppState>) -> Result<(), CommandError> {
     state.engine.begin_shutdown_and_exit(app);
     Ok(())
 }

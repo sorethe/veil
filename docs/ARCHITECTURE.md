@@ -7,6 +7,7 @@ src-tauri/
   Cargo.toml            veil (lib veil_lib + bin veil)
   src/main.rs           thin Tauri entrypoint
   src/lib.rs            app state, commands, setup, exit handling
+  src/errors.rs         typed CommandError envelope for every command
   src/settings.rs       ~/.config/veil/settings.json (0600, atomic writes)
   src/paths.rs          config/data/runtime/exports paths, 0700 dirs
   src/db.rs             rusqlite (bundled) profiles, selections, meta, backups
@@ -26,6 +27,23 @@ src-tauri/
 The frontend only talks to the backend through the commands/events documented in
 `docs/CONTRACT.md`. No UI logic is duplicated in Rust; no engine state is invented
 in Rust.
+
+## Typed boundary
+
+- `errors::CommandError { code, message, detail }` is the only rejection type for
+  commands. Internal modules still return `Result<T, String>`; the command layer
+  maps them into the envelope with `CommandError::from`/`from_engine`, preserving
+  the original message. Codes: `not-ready`, `validation`, `permission`, `engine`,
+  `network`, `io`, `unsupported`, `unknown`.
+- `core::EngineInfo` (exposed as `bootstrap.engineInfo`) reports the resolved
+  binary, its real version, `api: "clash"`, and `EngineCapabilities` derived from
+  the binary's build tags, `/dev/net/tun`, `nft`, `ip`, IPv6 sysctls and the
+  available desktop proxy CLIs. `Diagnostics.capabilities` carries the same
+  structure. Nothing is hardcoded true.
+- `engine://state` is the canonical live lifecycle stream; statuses and allowed
+  transitions are listed in `docs/CONTRACT.md`. `connected` is emitted only
+  after the Clash API `/version` health check, including when adopting an engine
+  after a GUI restart.
 
 ## Process and privilege separation
 
