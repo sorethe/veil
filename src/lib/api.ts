@@ -235,6 +235,24 @@ export interface Validation {
   outbounds: string[];
 }
 
+/**
+ * Real first-use TUN readiness probed by the backend. `canInstall` only says
+ * the installer has a helper binary and pkexec; `ready` is the connect gate.
+ */
+export interface TunSetup {
+  ready: boolean;
+  helperFound: boolean;
+  helperInstalled: boolean;
+  helperPath: string | null;
+  policyInstalled: boolean;
+  pkexecAvailable: boolean;
+  tunDevice: boolean;
+  nft: boolean;
+  canInstall: boolean;
+  missing: string[];
+  detail: string;
+}
+
 /** Optional arguments are omitted rather than sent as null so Rust defaults apply. */
 function args(
   entries: Record<string, string | number | null | undefined>,
@@ -290,6 +308,8 @@ export const api = {
 
   getSettings: () => invoke<Settings>("get_settings"),
   updateSettings: (patch: Partial<Settings>) => invoke<Settings>("update_settings", { patch }),
+  getTunSetup: () => invoke<TunSetup>("get_tun_setup"),
+  installTunHelper: () => invoke<TunSetup>("install_tun_helper"),
   runDiagnostics: () => invoke<Diagnostics>("run_diagnostics"),
   readClipboard: () => invoke<string>("read_clipboard"),
   openConfigDir: () => invoke<null>("open_config_dir"),

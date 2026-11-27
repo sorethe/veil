@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Profile } from "../api";
+  import { api, type Profile, type TunSetup } from "../api";
   import Icon from "../components/Icon.svelte";
   import Mark from "../components/Mark.svelte";
   import OutboundBrowser from "../components/OutboundBrowser.svelte";
@@ -8,8 +8,10 @@
   import Segmented from "../components/Segmented.svelte";
   import Sparkline from "../components/Sparkline.svelte";
   import StatusGlyph from "../components/StatusGlyph.svelte";
+  import TunSetupDialog from "../components/TunSetupDialog.svelte";
   import {
     copyText,
+    errorMessage,
     formatBytes,
     formatDelay,
     formatDuration,
@@ -26,6 +28,14 @@
   let modeError = $state<string | null>(null);
   let selectedId = $state<string | null>(null);
   let now = $state(Date.now());
+  let setupOpen = $state(false);
+  let setupIntent = $state<"enable" | "connect">("enable");
+  let pendingConnect = $state(false);
+  let tunSetup = $state<TunSetup | null>(null);
+  let tunSetupError = $state<string | null>(null);
+  let checkingSetup = $state(false);
+  let finalizingSetup = $state(false);
+  let setupSeq = 0;
 
   const selectedProfile = $derived(
     app.profiles.find((profile) => String(profile.id) === selectedId) ?? null,
@@ -65,9 +75,13 @@
               : "The engine core lacks the Clash API required by Veil."
             : !modeReady
               ? "The saved mode is TUN, but the backend reports TUN as unavailable. Choose System proxy."
-              : app.connectBusy
-                ? "A connection command is already running."
-                : null,
+              : finalizingSetup
+                ? "Finishing TUN setup."
+                : checkingSetup
+                  ? "Checking TUN setup."
+                  : app.connectBusy
+                    ? "A connection command is already running."
+                    : null,
   );
 
   const modeOptions = $derived([
@@ -75,10 +89,16 @@
     { value: "tun", label: "TUN", hint: tunHint, disabled: !tunAvailable },
   ]);
 
+  const setupRequired = $derived(
+    mode === "tun" && modeReady && (tunSetup ? !tunSetup.ready : tunSetupError !== null),
+  );
+
   const isLive = $derived(app.connected);
   const failedWithRuntime = $derived(app.engine.status === "error" && app.engine.pid !== null);
   const canStop = $derived(isLive || failedWithRuntime);
-  const buttonDisabled = $derived(app.busy || app.connectBusy || (!canStop && !canConnect));
+  const buttonDisabled = $derived(
+    app.busy || app.connectBusy || checkingSetup || finalizingSetup || (!canStop && !canConnect),
+  );
   const buttonLabel = $derived(
     app.engine.status === "starting"
       ? "Linking"
@@ -145,12 +165,17 @@
   const coreVersion = $derived(app.engineInfo?.version ?? app.core?.version ?? null);
   const corePath = $derived(app.engineInfo?.path ?? app.core?.path ?? null);
   const profileIdLabel = $derived(app.engine.profileId ?? selectedProfile?.id ?? "—");
+  const modeSwitchLocked = $derived(locked || checkingSetup || finalizingSetup);
   const modeHint = $derived(
     locked
       ? "Disconnect to change profile or mode."
-      : mode === "tun"
-        ? "Interface routing; the helper and permissions are required."
-        : "Apps that honor desktop proxy settings.",
+      : finalizingSetup
+        ? "Finishing TUN setup."
+        : checkingSetup
+          ? "Checking TUN setup."
+          : mode === "tun"
+            ? "Interface routing; the helper and permissions are required."
+            : "Apps that honor desktop proxy settings.",
   );
 
   $effect(() => {
@@ -178,8 +203,73 @@
     }
   });
 
+  $effect(() => {
+    if (mode !== "tun" || !modeReady) return;
+    void refreshTunSetup();
+  });
+
+  async function refreshTunSetup(): Promise<TunSetup | null> {
+    const seq = ++setupSeq;
+    checkingSetup = true;
+    try {
+      const next = await api.getTunSetup();
+      if (seq === setupSeq) {
+        tunSetup = next;
+        tunSetupError = null;
+      }
+      return next;
+    } catch (cause) {
+      if (seq === setupSeq) {
+        tunSetup = null;
+        tunSetupError = errorMessage(cause);
+      }
+      return null;
+    } finally {
+      if (seq === setupSeq) checkingSetup = false;
+    }
+  }
+
+  function openTunSetup(intent: "enable" | "connect"): void {
+    setupIntent = intent;
+    pendingConnect = intent === "connect";
+    setupOpen = true;
+  }
+
+  function closeTunSetup(): void {
+    setupOpen = false;
+    pendingConnect = false;
+  }
+
+  async function onTunReady(setup: TunSetup): Promise<void> {
+    const shouldConnect = pendingConnect;
+    setupOpen = false;
+    pendingConnect = false;
+    tunSetup = setup;
+    tunSetupError = null;
+    modeError = null;
+    finalizingSetup = true;
+    try {
+      const error = await app.saveSettings({ mode: "tun" });
+      if (error) {
+        modeError = error;
+        app.notify("error", "TUN mode not saved", error);
+        return;
+      }
+      if (!shouldConnect) return;
+      if (app.connected || app.busy || app.connectBusy) return;
+      const profile = selectedProfile;
+      if (!profile) {
+        app.notify("error", "No profile selected", "Select a profile before connecting.");
+        return;
+      }
+      await app.connect(profile.id, "tun");
+    } finally {
+      finalizingSetup = false;
+    }
+  }
+
   async function toggleConnection(): Promise<void> {
-    if (app.busy || app.connectBusy) return;
+    if (app.busy || app.connectBusy || checkingSetup || finalizingSetup) return;
     if (app.connected || (app.engine.status === "error" && app.engine.pid !== null)) {
       await app.disconnect();
       return;
@@ -200,12 +290,31 @@
       app.notify("error", "TUN is unavailable", disabledReason ?? tunHint);
       return;
     }
-    await app.connect(selectedProfile.id, app.settings?.mode ?? "system");
+    if (mode === "tun") {
+      const setup = await refreshTunSetup();
+      if (!setup?.ready) {
+        openTunSetup("connect");
+        return;
+      }
+    }
+    await app.connect(selectedProfile.id, mode);
   }
 
   async function setMode(next: string): Promise<void> {
     if (next !== "system" && next !== "tun") return;
     modeError = null;
+    if (next === "tun") {
+      if (!tunAvailable) {
+        modeError = tunHint;
+        app.notify("error", "TUN is unavailable", tunHint);
+        return;
+      }
+      const setup = await refreshTunSetup();
+      if (!setup?.ready) {
+        openTunSetup("enable");
+        return;
+      }
+    }
     const error = await app.saveSettings({ mode: next });
     if (error) {
       modeError = error;
@@ -227,7 +336,7 @@
 
   function onKeydown(event: KeyboardEvent): void {
     if (!(event.key === "Enter" && (event.ctrlKey || event.metaKey))) return;
-    if (importOpen) return;
+    if (importOpen || setupOpen) return;
     const target = event.target;
     if (
       target instanceof HTMLElement &&
@@ -370,7 +479,7 @@
             value={mode}
             options={modeOptions}
             label="Proxy mode"
-            disabled={locked}
+            disabled={modeSwitchLocked}
             onchange={(next) => void setMode(next)}
           />
           <p class="monitor__hint">{modeHint}</p>
@@ -382,6 +491,27 @@
           {/if}
           {#if mode === "tun" && !modeReady}
             <p class="monitor__warn">{tunHint} Choose System proxy before connecting.</p>
+          {:else if setupRequired}
+            <div class="monitor__setup">
+              <p class="monitor__warn">
+                {#if tunSetup}
+                  TUN setup required: {tunSetup.missing[0] ?? tunSetup.detail}{tunSetup.missing
+                    .length > 1
+                    ? ` (+${tunSetup.missing.length - 1} more)`
+                    : ""}.
+                {:else}
+                  TUN setup could not be checked: {tunSetupError}
+                {/if}
+              </p>
+              <button
+                type="button"
+                class="btn btn--sm btn--quiet"
+                title={tunSetup ? tunSetup.missing.join("; ") : undefined}
+                onclick={() => openTunSetup("enable")}
+              >
+                <Icon name="warning" size={11} /> Set up TUN
+              </button>
+            </div>
           {/if}
           {#if !engineReady}
             <p class="monitor__warn" role="alert">
@@ -546,6 +676,14 @@
   />
 {/if}
 
+{#if setupOpen}
+  <TunSetupDialog
+    intent={setupIntent}
+    onclose={closeTunSetup}
+    onready={(setup) => void onTunReady(setup)}
+  />
+{/if}
+
 <style>
   .overview-head {
     padding-bottom: 10px;
@@ -641,6 +779,12 @@
     color: var(--error);
     overflow-wrap: anywhere;
     white-space: pre-wrap;
+  }
+
+  .monitor__setup {
+    display: grid;
+    gap: 5px;
+    justify-items: start;
   }
 
   .monitor__rates {

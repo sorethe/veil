@@ -221,6 +221,12 @@ desktop entry and the icon. TUN start/stop goes through
 `pkexec /usr/bin/veil-helper ...`; there is no passwordless sudoers rule. Do not
 run this on a system where the `veil` package is installed (the paths conflict).
 
+Selecting TUN for the first time opens the TUN setup dialog. It probes the
+helper, polkit policy, `pkexec`, `/dev/net/tun` and nftables, and can install
+the helper and embedded policy with admin approval via `pkexec`; the GUI never
+runs as root. If the script above was already run, the dialog reports TUN as
+ready and no install is offered.
+
 ## Repository layout
 
 ```

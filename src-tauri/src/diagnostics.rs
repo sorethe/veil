@@ -58,6 +58,25 @@ pub struct HelperInfo {
     pub path: Option<String>,
 }
 
+/// First-use TUN readiness. `ready` is the gate for TUN connect; `canInstall`
+/// says whether `install_tun_helper` can plausibly succeed (a helper binary and
+/// pkexec are available, and something is still missing).
+#[derive(Clone, Debug, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TunSetup {
+    pub ready: bool,
+    pub helper_found: bool,
+    pub helper_installed: bool,
+    pub helper_path: Option<String>,
+    pub policy_installed: bool,
+    pub pkexec_available: bool,
+    pub tun_device: bool,
+    pub nft: bool,
+    pub can_install: bool,
+    pub missing: Vec<String>,
+    pub detail: String,
+}
+
 #[derive(Clone, Debug, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Diagnostics {
@@ -85,6 +104,13 @@ fn command_exists(name: &str) -> bool {
             })
             .unwrap_or(false)
     })
+}
+
+fn executable_file(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    fs::metadata(path)
+        .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
 }
 
 fn which(name: &str) -> Option<PathBuf> {
@@ -140,19 +166,89 @@ pub fn find_helper(resource_dir: Option<&Path>) -> Option<PathBuf> {
     if let Some(path) = which("veil-helper") {
         candidates.push(path);
     }
-    candidates.into_iter().find(|p| {
-        fs::metadata(p)
-            .map(|m| {
-                use std::os::unix::fs::PermissionsExt;
-                m.is_file() && m.permissions().mode() & 0o111 != 0
-            })
-            .unwrap_or(false)
-    })
+    candidates.into_iter().find(|p| executable_file(p))
 }
 
 fn polkit_policy_installed() -> bool {
     Path::new("/usr/share/polkit-1/actions/dev.veil.helper.policy").exists()
         || Path::new("/usr/share/polkit-1/actions/veil-helper.policy").exists()
+}
+
+fn tun_setup_from_parts(
+    helper_found: bool,
+    helper_path: Option<String>,
+    helper_installed: bool,
+    policy_installed: bool,
+    pkexec_available: bool,
+    tun_device: bool,
+    nft: bool,
+) -> TunSetup {
+    let mut missing = Vec::new();
+    if !helper_installed {
+        missing.push(if helper_found {
+            "veil-helper is not installed to /usr/bin/veil-helper".to_string()
+        } else {
+            "veil-helper binary was not found".to_string()
+        });
+    }
+    if !policy_installed {
+        missing.push("polkit policy dev.veil.helper is not installed".to_string());
+    }
+    if !pkexec_available {
+        missing.push("pkexec is not installed".to_string());
+    }
+    if !tun_device {
+        missing.push("/dev/net/tun is missing".to_string());
+    }
+    if !nft {
+        missing.push("nft is not installed".to_string());
+    }
+    let ready = helper_installed && policy_installed && pkexec_available && tun_device && nft;
+    let can_install = helper_found && pkexec_available && (!helper_installed || !policy_installed);
+    let detail = if ready {
+        "TUN setup is ready.".to_string()
+    } else {
+        format!("TUN setup is incomplete: {}", missing.join("; "))
+    };
+    TunSetup {
+        ready,
+        helper_found,
+        helper_installed,
+        helper_path,
+        policy_installed,
+        pkexec_available,
+        tun_device,
+        nft,
+        can_install,
+        missing,
+        detail,
+    }
+}
+
+/// Probe the real system for TUN prerequisites. Never reports a requirement as
+/// satisfied unless the corresponding file/binary is actually present.
+pub fn tun_setup(resource_dir: Option<&Path>) -> TunSetup {
+    let helper_path = find_helper(resource_dir);
+    let helper_found = helper_path.is_some();
+    let helper_installed = [
+        Path::new("/usr/bin/veil-helper"),
+        Path::new("/usr/local/bin/veil-helper"),
+    ]
+    .iter()
+    .any(|path| executable_file(path));
+    let policy_installed = polkit_policy_installed();
+    let pkexec_available = find_in_path("pkexec").is_some();
+    let tun_device = Path::new("/dev/net/tun").exists();
+    let nft = find_in_path("nft").is_some();
+    tun_setup_from_parts(
+        helper_found,
+        helper_path.map(|path| path.to_string_lossy().into_owned()),
+        helper_installed,
+        policy_installed,
+        pkexec_available,
+        tun_device,
+        nft,
+    )
 }
 
 fn run_ip(args: &[&str]) -> Option<Value> {
@@ -457,6 +553,92 @@ mod tests {
                 !diag.permissions.helper,
                 "dev helper must not imply permission"
             );
+        }
+    }
+
+    fn setup(
+        helper_found: bool,
+        helper_installed: bool,
+        policy_installed: bool,
+        pkexec_available: bool,
+        tun_device: bool,
+        nft: bool,
+    ) -> TunSetup {
+        tun_setup_from_parts(
+            helper_found,
+            helper_found.then(|| "/usr/bin/veil-helper".to_string()),
+            helper_installed,
+            policy_installed,
+            pkexec_available,
+            tun_device,
+            nft,
+        )
+    }
+
+    #[test]
+    fn tun_setup_ready_requires_every_privileged_requirement() {
+        let ready = setup(true, true, true, true, true, true);
+        assert!(ready.ready);
+        assert!(ready.missing.is_empty());
+        assert!(!ready.can_install);
+        assert_eq!(ready.detail, "TUN setup is ready.");
+        for (helper_installed, policy, pkexec, tun, nft) in [
+            (false, true, true, true, true),
+            (true, false, true, true, true),
+            (true, true, false, true, true),
+            (true, true, true, false, true),
+            (true, true, true, true, false),
+        ] {
+            let partial = setup(true, helper_installed, policy, pkexec, tun, nft);
+            assert!(!partial.ready);
+            assert_eq!(partial.missing.len(), 1);
+        }
+    }
+
+    #[test]
+    fn tun_setup_reports_each_missing_requirement_and_installability() {
+        let incomplete = setup(true, false, false, true, true, true);
+        assert!(!incomplete.ready);
+        assert!(incomplete.can_install);
+        assert!(incomplete.helper_found);
+        assert!(incomplete
+            .missing
+            .iter()
+            .any(|label| label.contains("not installed to /usr/bin/veil-helper")));
+        assert!(incomplete
+            .missing
+            .iter()
+            .any(|label| label.contains("polkit policy")));
+        assert_eq!(incomplete.missing.len(), 2);
+
+        let no_helper = setup(false, false, false, true, true, true);
+        assert!(!no_helper.can_install);
+        assert!(no_helper
+            .missing
+            .iter()
+            .any(|label| label.contains("binary was not found")));
+
+        let no_pkexec = setup(true, false, false, false, true, true);
+        assert!(!no_pkexec.can_install);
+    }
+
+    #[test]
+    fn tun_setup_serializes_contract_fields() {
+        let json = serde_json::to_value(setup(true, false, false, true, true, true)).unwrap();
+        for key in [
+            "ready",
+            "helperFound",
+            "helperInstalled",
+            "helperPath",
+            "policyInstalled",
+            "pkexecAvailable",
+            "tunDevice",
+            "nft",
+            "canInstall",
+            "missing",
+            "detail",
+        ] {
+            assert!(json.get(key).is_some(), "missing {key}");
         }
     }
 

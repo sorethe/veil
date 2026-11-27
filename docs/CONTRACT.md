@@ -72,6 +72,8 @@ normalize those, but this backend only emits the envelope.
 | `get_settings` | – | `Settings` |
 | `update_settings` | `patch: object` (partial settings) | `Settings` |
 | `run_diagnostics` | – | `Diagnostics` |
+| `get_tun_setup` | – | `TunSetup` |
+| `install_tun_helper` | – | `TunSetup` (after installing) |
 | `read_clipboard` | – | `string` |
 | `open_config_dir` | – | `null` |
 | `set_autostart` | `enabled: boolean` | `boolean` |
@@ -217,7 +219,30 @@ type Diagnostics = {
   tray: { available: boolean; detail: string }
   helper: { installed: boolean; path: string | null }
 }
+
+type TunSetup = {
+  ready: boolean             // helper installed + policy + pkexec + /dev/net/tun + nft
+  helperFound: boolean       // a veil-helper executable was located
+  helperInstalled: boolean   // /usr/bin/veil-helper or /usr/local/bin/veil-helper
+  helperPath: string | null  // located helper binary, null when not found
+  policyInstalled: boolean   // dev.veil.helper.policy under /usr/share/polkit-1/actions
+  pkexecAvailable: boolean
+  tunDevice: boolean         // /dev/net/tun exists
+  nft: boolean               // nft executable on PATH
+  canInstall: boolean        // helperFound && pkexecAvailable && missing helper/policy
+  missing: string[]          // human-readable labels for each unmet requirement
+  detail: string             // summary suitable for display
+}
 ```
+
+`get_tun_setup` reports the live TUN prerequisite state; it never mutates
+anything. `install_tun_helper` locates the helper (resources or installed
+location), requires `pkexec`, and runs `pkexec <helper> install` (120s timeout).
+The helper embeds the polkit policy and atomically installs itself to
+`/usr/bin/veil-helper` as root; the GUI process never runs as root and no shell
+is involved. Success resolves with the refreshed `TunSetup`; a missing helper
+or pkexec rejects with `unsupported`, and a failed/cancelled authorization
+rejects with `permission` plus a `detail` string.
 
 `bootstrap.platform`:
 
@@ -277,6 +302,11 @@ Rules:
 
 - `engine://state` is the only authority on engine state (see lifecycle above).
   `connect` resolves `connected` only after a real Clash API health check.
+- `connect` with `mode: 'tun'` (or the persisted `settings.mode` when `mode` is
+  omitted) first checks `get_tun_setup`. If `ready` is false it rejects before
+  spawning anything with code `permission`, message `"TUN setup is required"`,
+  and `detail` listing the missing requirements. The UI should offer
+  `install_tun_helper` and then retry. `system` mode is unaffected.
 - Stats are only produced by sing-box's Clash API. When idle, `get_stats`
   returns cached zeros and `duration: 0`; nothing is polled when idle.
 - `proxy.kind` values: `gnome`, `kde`, `xfce`, `tun`, `unsupported`, `error`.

@@ -11,7 +11,11 @@ been tagged or published as a binary.
 
 ### Added
 
-- Nothing yet.
+- First-use TUN setup: Overview, Settings and connect now probe the privileged
+  helper, `dev.veil.helper` polkit policy, `pkexec`, `/dev/net/tun` and nftables.
+  A setup dialog shows each prerequisite and installs the embedded helper and
+  policy through `pkexec` with admin approval; the GUI itself never runs as
+  root. TUN connect stays gated until the real setup is ready.
 
 ### Changed
 

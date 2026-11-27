@@ -288,6 +288,18 @@ async fn connect(
     mode: Option<String>,
     profile_id: Option<i64>,
 ) -> Result<EngineState, CommandError> {
+    let effective_mode = mode.clone().unwrap_or_else(|| state.settings.get().mode);
+    if effective_mode == "tun" {
+        let setup = diagnostics::tun_setup(state.resource_dir.as_deref());
+        if !setup.ready {
+            let detail = if setup.missing.is_empty() {
+                setup.detail
+            } else {
+                setup.missing.join("; ")
+            };
+            return Err(CommandError::permission("TUN setup is required").with_detail(detail));
+        }
+    }
     state
         .engine
         .connect(mode, profile_id)
@@ -741,6 +753,70 @@ async fn run_diagnostics(
 }
 
 #[tauri::command]
+async fn get_tun_setup(state: State<'_, AppState>) -> Result<diagnostics::TunSetup, CommandError> {
+    Ok(diagnostics::tun_setup(state.resource_dir.as_deref()))
+}
+
+/// Install the privileged helper and embedded polkit policy through pkexec.
+/// The GUI process never runs as root; pkexec asks polkit for authorization.
+#[tauri::command]
+async fn install_tun_helper(
+    state: State<'_, AppState>,
+) -> Result<diagnostics::TunSetup, CommandError> {
+    let helper = diagnostics::find_helper(state.resource_dir.as_deref()).ok_or_else(|| {
+        CommandError::unsupported("veil-helper was not found; cannot install the privileged helper")
+    })?;
+    let pkexec = diagnostics::find_in_path("pkexec").ok_or_else(|| {
+        CommandError::unsupported(
+            "pkexec is not installed; TUN setup needs polkit to install veil-helper",
+        )
+    })?;
+    let mut command = tokio::process::Command::new(pkexec);
+    command.arg(&helper).arg("install").kill_on_drop(true);
+    let output = match tokio::time::timeout(Duration::from_secs(120), command.output()).await {
+        Ok(Ok(output)) => output,
+        Ok(Err(e)) => return Err(CommandError::io(format!("run pkexec: {e}"))),
+        Err(_) => {
+            return Err(CommandError::permission(
+                "Installing the TUN helper timed out waiting for authorization",
+            )
+            .with_detail("pkexec did not finish within 120s"));
+        }
+    };
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let installed = stdout
+        .lines()
+        .rev()
+        .filter_map(|line| serde_json::from_str::<Value>(line.trim()).ok())
+        .any(|value| value.get("ok").and_then(Value::as_bool) == Some(true));
+    if !installed {
+        let combined = format!("{}\n{}", stdout.trim(), stderr.trim());
+        let reported = combined
+            .lines()
+            .rev()
+            .filter_map(|line| serde_json::from_str::<Value>(line.trim()).ok())
+            .find_map(|value| {
+                value
+                    .get("error")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            });
+        let detail = reported.unwrap_or_else(|| combined.trim().to_string());
+        let detail = if detail.is_empty() {
+            format!("pkexec exited with {}", output.status)
+        } else {
+            detail
+        };
+        return Err(
+            CommandError::permission("TUN helper installation did not complete")
+                .with_detail(detail),
+        );
+    }
+    Ok(diagnostics::tun_setup(state.resource_dir.as_deref()))
+}
+
+#[tauri::command]
 async fn read_clipboard() -> Result<String, CommandError> {
     if let Ok(Ok(output)) = tokio::time::timeout(
         Duration::from_secs(3),
@@ -981,6 +1057,8 @@ pub fn run() {
             get_settings,
             update_settings,
             run_diagnostics,
+            get_tun_setup,
+            install_tun_helper,
             read_clipboard,
             open_config_dir,
             set_autostart,

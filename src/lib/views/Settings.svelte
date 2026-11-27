@@ -1,9 +1,10 @@
 <script lang="ts">
-  import { untrack } from "svelte";
-  import { api, type Mode, type Settings, type ThemeMode } from "../api";
+  import { onMount, untrack } from "svelte";
+  import { api, type Mode, type Settings, type ThemeMode, type TunSetup } from "../api";
   import Icon from "../components/Icon.svelte";
   import Segmented from "../components/Segmented.svelte";
   import Toggle from "../components/Toggle.svelte";
+  import TunSetupDialog from "../components/TunSetupDialog.svelte";
   import { errorMessage, modeLabel } from "../format";
   import { app } from "../state.svelte";
 
@@ -25,6 +26,13 @@
   let errors = $state<Record<string, string | null>>({});
   let detecting = $state(false);
   let coreNote = $state<string | null>(null);
+  let setupOpen = $state(false);
+  let setupForMode = $state(false);
+  let tunSetup = $state<TunSetup | null>(null);
+  let tunSetupError = $state<string | null>(null);
+  let setupChecking = $state(false);
+  let setupSeq = 0;
+  let modeSeq = 0;
   let lastSignature = "";
 
   const trayAvailable = $derived(app.platform?.trayAvailable ?? false);
@@ -55,6 +63,21 @@
   const logLevels = $derived(
     Array.from(new Set(["trace", "debug", "info", "warn", "error", "fatal", "panic", logLevel])),
   );
+  const tunSetupLabel = $derived(
+    setupChecking
+      ? "checking"
+      : tunSetup
+        ? tunSetup.ready
+          ? "ready"
+          : "required"
+        : tunSetupError
+          ? "unknown"
+          : "not checked",
+  );
+
+  onMount(() => {
+    void refreshTunSetup();
+  });
 
   const themeOptions = [
     { value: "dark", label: "Dark" },
@@ -131,12 +154,75 @@
 
   function changeMode(next: string): void {
     if (!isMode(next)) return;
-    if (next === "tun" && !tunAvailable) {
+    const seq = ++modeSeq;
+    if (next === "system") {
+      mode = next;
+      void apply("mode", { mode: next });
+      return;
+    }
+    if (!tunAvailable) {
       errors.mode = tunReason;
       return;
     }
-    mode = next;
-    void apply("mode", { mode: next });
+    errors.mode = null;
+    void requestTunMode(seq);
+  }
+
+  async function requestTunMode(seq: number): Promise<void> {
+    const setup = await refreshTunSetup();
+    if (seq !== modeSeq) return;
+    if (setup?.ready) {
+      mode = "tun";
+      void apply("mode", { mode: "tun" });
+      return;
+    }
+    setupForMode = true;
+    setupOpen = true;
+  }
+
+  async function refreshTunSetup(): Promise<TunSetup | null> {
+    const seq = ++setupSeq;
+    setupChecking = true;
+    try {
+      const next = await api.getTunSetup();
+      if (seq === setupSeq) {
+        tunSetup = next;
+        tunSetupError = null;
+      }
+      return next;
+    } catch (cause) {
+      if (seq === setupSeq) {
+        tunSetup = null;
+        tunSetupError = errorMessage(cause);
+      }
+      return null;
+    } finally {
+      if (seq === setupSeq) setupChecking = false;
+    }
+  }
+
+  function openTunSetup(): void {
+    setupForMode = false;
+    setupOpen = true;
+  }
+
+  function closeTunSetup(): void {
+    setupOpen = false;
+    setupForMode = false;
+    void refreshTunSetup();
+  }
+
+  async function onTunReady(setup: TunSetup): Promise<void> {
+    tunSetup = setup;
+    tunSetupError = null;
+    const forMode = setupForMode;
+    setupOpen = false;
+    setupForMode = false;
+    if (forMode) {
+      mode = "tun";
+      await apply("mode", { mode: "tun" }, "TUN mode saved");
+    }
+    void refreshTunSetup();
   }
 
   function commitPort(field: "mixedPort" | "apiPort"): void {
@@ -522,6 +608,43 @@
 
       <div class="deflist__row">
         <dt class="setting">
+          <span class="setting__label">TUN setup</span>
+          <span class="setting__hint">
+            TUN needs the privileged helper and polkit policy. Veil installs them with admin
+            approval via pkexec; the GUI never runs as root.
+          </span>
+        </dt>
+        <dd class="setting__control">
+          <div class="row row--wrap">
+            <button type="button" class="btn btn--sm" onclick={openTunSetup}>
+              <Icon name="diagnostics" size={12} /> Set up TUN
+            </button>
+            <span
+              class="tag"
+              class:tag--accent={tunSetup?.ready === true}
+              class:tag--warning={tunSetup?.ready === false || tunSetupError !== null}
+            >
+              {tunSetupLabel}
+            </span>
+          </div>
+          {#if tunSetup && !tunSetup.ready}
+            <p class="setting__hint">
+              {#if tunSetup.missing.length}
+                Missing: {tunSetup.missing.join(" · ")}
+              {:else}
+                {tunSetup.detail}
+              {/if}
+            </p>
+          {:else if tunSetup?.ready}
+            <p class="setting__hint">{tunSetup.detail}</p>
+          {:else if tunSetupError}
+            <p class="field__error" role="alert">{tunSetupError}</p>
+          {/if}
+        </dd>
+      </div>
+
+      <div class="deflist__row">
+        <dt class="setting">
           <span class="setting__label">API port</span>
           <span class="setting__hint">
             Local Clash API used for stats, connections, and outbound switching.
@@ -682,6 +805,14 @@
   Backend state is authoritative. A rejected change leaves the previous value in place and reports
   the error here.
 </p>
+
+{#if setupOpen}
+  <TunSetupDialog
+    intent={setupForMode ? "enable" : "inspect"}
+    onclose={closeTunSetup}
+    onready={(setup) => void onTunReady(setup)}
+  />
+{/if}
 
 <style>
   .settings {

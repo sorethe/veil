@@ -6,7 +6,13 @@
 //!   start  --config PATH --core PATH --pid-file PATH [--log-file PATH]
 //!   stop   --pid-file PATH
 //!   status --pid-file PATH
+//!   install
 //! Every command prints a single JSON object on stdout.
+
+const EMBEDDED_POLICY: &str = include_str!("../../resources/dev.veil.helper.policy");
+const HELPER_INSTALL_PATH: &str = "/usr/bin/veil-helper";
+const POLICY_INSTALL_PATH: &str = "/usr/share/polkit-1/actions/dev.veil.helper.policy";
+const RUNTIME_DIR: &str = "/run/veil";
 
 use serde_json::{json, Value};
 use std::env;
@@ -243,6 +249,66 @@ fn read_log_tail(path: &Path) -> String {
     String::from_utf8_lossy(&bytes).trim().to_string()
 }
 
+fn install_atomic(
+    target: &Path,
+    mode: u32,
+    writer: impl FnOnce(&mut fs::File) -> std::io::Result<()>,
+) -> Result<(), String> {
+    let dir = target
+        .parent()
+        .ok_or_else(|| format!("{} has no parent directory", target.display()))?;
+    fs::create_dir_all(dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
+    let tmp = dir.join(format!(".veil-helper-install-{}.tmp", std::process::id()));
+    let _ = fs::remove_file(&tmp);
+    let result = (|| -> Result<(), String> {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(mode)
+            .open(&tmp)
+            .map_err(|e| format!("create temp file {}: {e}", tmp.display()))?;
+        writer(&mut file).map_err(|e| format!("write {}: {e}", tmp.display()))?;
+        file.sync_all()
+            .map_err(|e| format!("sync {}: {e}", tmp.display()))?;
+        fs::set_permissions(&tmp, fs::Permissions::from_mode(mode))
+            .map_err(|e| format!("chmod {}: {e}", tmp.display()))?;
+        fs::rename(&tmp, target).map_err(|e| format!("install {}: {e}", target.display()))?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    result
+}
+
+fn cmd_install() -> ! {
+    require_root();
+    let exe =
+        env::current_exe().unwrap_or_else(|e| fail(&format!("resolve helper executable: {e}")));
+    if let Err(e) = install_atomic(Path::new(HELPER_INSTALL_PATH), 0o755, |file| {
+        let mut source = fs::File::open(&exe)?;
+        std::io::copy(&mut source, file).map(|_| ())
+    }) {
+        fail(&e);
+    }
+    if let Err(e) = install_atomic(Path::new(POLICY_INSTALL_PATH), 0o644, |file| {
+        file.write_all(EMBEDDED_POLICY.as_bytes())
+    }) {
+        fail(&e);
+    }
+    if let Err(e) = fs::create_dir_all(RUNTIME_DIR) {
+        fail(&format!("create {RUNTIME_DIR}: {e}"));
+    }
+    if let Err(e) = fs::set_permissions(RUNTIME_DIR, fs::Permissions::from_mode(0o755)) {
+        fail(&format!("chmod {RUNTIME_DIR}: {e}"));
+    }
+    ok(json!({
+        "ok": true,
+        "helper": HELPER_INSTALL_PATH,
+        "policy": POLICY_INSTALL_PATH
+    }))
+}
+
 fn cmd_check(args: &[String]) -> ! {
     let core = find_core(flag(args, "--core"));
     ok(json!({
@@ -445,13 +511,14 @@ fn cmd_status(args: &[String]) -> ! {
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
     let Some(command) = args.first() else {
-        fail("usage: veil-helper <check|start|stop|status> [options]");
+        fail("usage: veil-helper <check|start|stop|status|install> [options]");
     };
     match command.as_str() {
         "check" => cmd_check(&args),
         "start" => cmd_start(&args),
         "stop" => cmd_stop(&args),
         "status" => cmd_status(&args),
+        "install" => cmd_install(),
         other => fail(&format!("unknown command '{other}'")),
     }
 }
@@ -482,6 +549,12 @@ mod tests {
         assert_eq!(state.pid, 1234);
         assert!(config.is_none());
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn embedded_policy_declares_veil_action() {
+        assert!(EMBEDDED_POLICY.contains("<action id=\"dev.veil.helper\">"));
+        assert!(EMBEDDED_POLICY.contains("/usr/bin/veil-helper"));
     }
 
     #[test]
