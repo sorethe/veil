@@ -14,6 +14,10 @@
     return groups.some((group) => group.options.includes(outbound.tag));
   }
 
+  function isGroup(outbound: Outbound): boolean {
+    return outbound.kind === "selector" || outbound.kind === "urltest";
+  }
+
   function activeGroupOf(outbound: Outbound): Outbound | null {
     return groups.find((group) => group.now === outbound.tag) ?? null;
   }
@@ -95,7 +99,7 @@
             <tr>
               <td>
                 <span class="mono outbound__tag">{outbound.tag}</span>
-                {#if !memberOfAnyGroup(outbound) && !selectedIn(outbound)}
+                {#if !isGroup(outbound) && !memberOfAnyGroup(outbound) && !selectedIn(outbound)}
                   <span class="outbound__note">fixed</span>
                 {/if}
               </td>

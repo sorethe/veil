@@ -881,6 +881,7 @@ pub fn run() {
             }
 
             engine.spawn_startup();
+            engine.install_signal_handlers(handle.clone());
             spawn_subscription_updater(
                 handle.clone(),
                 settings.clone(),

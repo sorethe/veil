@@ -22,6 +22,7 @@ use std::time::Duration;
 use tauri::AppHandle;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncSeekExt, BufReader};
 use tokio::process::Child;
+use tokio::signal::unix::SignalKind;
 use tokio::sync::Mutex as AsyncMutex;
 use tokio::task::JoinHandle;
 
@@ -1106,6 +1107,10 @@ impl Engine {
         let guard = self.op_lock.lock().await;
         let current = self.snapshot();
         if current.status == "idle" {
+            // Idle with leftover runtime state means a previous teardown was
+            // interrupted; finish it so signal-driven exit is still clean.
+            self.remove_runtime_file();
+            *self.clash.lock().unwrap() = None;
             if let Err(e) = sysproxy::restore() {
                 self.logs
                     .push("warn", "engine", format!("restore system proxy: {e}"));
@@ -1268,11 +1273,46 @@ impl Engine {
     }
 
     pub fn begin_shutdown_and_exit(self: &Arc<Self>, app: AppHandle) {
-        self.shutting_down.store(true, Ordering::SeqCst);
+        if self.shutting_down.swap(true, Ordering::SeqCst) {
+            return;
+        }
         let engine = self.clone();
         tauri::async_runtime::spawn(async move {
             let _ = engine.disconnect().await;
             app.exit(0);
+        });
+    }
+
+    /// Route SIGTERM/SIGINT through the same graceful teardown as the
+    /// window-close, tray-quit and `quit` command paths. Installing a Tokio
+    /// signal listener also replaces the default disposition, so a signal
+    /// arriving mid-cleanup cannot kill the process before the engine stops.
+    pub fn install_signal_handlers(self: &Arc<Self>, app: AppHandle) {
+        self.spawn_signal_listener(app.clone(), SignalKind::terminate(), "SIGTERM");
+        self.spawn_signal_listener(app, SignalKind::interrupt(), "SIGINT");
+    }
+
+    fn spawn_signal_listener(self: &Arc<Self>, app: AppHandle, kind: SignalKind, name: &'static str) {
+        let engine = self.clone();
+        tauri::async_runtime::spawn(async move {
+            let mut stream = match tokio::signal::unix::signal(kind) {
+                Ok(stream) => stream,
+                Err(e) => {
+                    engine.logs.push(
+                        "warn",
+                        "engine",
+                        format!("cannot listen for {name}: {e}"),
+                    );
+                    return;
+                }
+            };
+            if stream.recv().await.is_none() {
+                return;
+            }
+            engine
+                .logs
+                .push("info", "engine", format!("received {name}; shutting down"));
+            engine.begin_shutdown_and_exit(app);
         });
     }
 
