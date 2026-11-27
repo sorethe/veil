@@ -227,10 +227,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .timeout(Duration::from_secs(20))
         .redirect(reqwest::redirect::Policy::limited(5))
         .build()?;
-    let Some((http_status, body)) = (match fetch_raw(&client, &url).await {
-        Ok(value) => Some(value),
-        Err(()) => None,
-    }) else {
+    let Some((http_status, body)) = fetch_raw(&client, &url).await.ok() else {
         println!("classification: HTTP/network error; no profile created");
         verify_log_redaction(&logs, &url);
         return Ok(());
@@ -273,13 +270,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("outbound_count: {outbound_count}");
 
     let checked = core::validate_content(
-        &core,
-        &content,
-        "system",
-        mixed_port,
-        api_port,
-        false,
-        "info",
+        &core, &content, "system", mixed_port, api_port, false, "info",
     );
     match checked {
         Ok(tags) => println!("sing_box_check: ok ({} outbound tags)", tags.len()),
@@ -420,20 +411,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("refresh_http_status: {refresh_status}");
             let refresh_result = normalize_subscription_body(&refresh_body).and_then(|content| {
                 core::validate_content(
-                    &core,
-                    &content,
-                    "system",
-                    mixed_port,
-                    api_port,
-                    false,
-                    "info",
+                    &core, &content, "system", mixed_port, api_port, false, "info",
                 )
                 .map(|_| content)
             });
             match refresh_result {
                 Ok(refreshed) => {
-                    let updated =
-                        db.set_subscription_result(profile.id, Some(&refreshed), None)?;
+                    let updated = db.set_subscription_result(profile.id, Some(&refreshed), None)?;
                     println!(
                         "refresh: revalidated=true updated_at_advanced={} last_error_null={}",
                         updated.updated_at > before_updated,
@@ -451,11 +435,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         Err(()) => {
-            let _ = db.set_subscription_result(
-                profile.id,
-                None,
-                Some("refresh network failure"),
-            );
+            let _ = db.set_subscription_result(profile.id, None, Some("refresh network failure"));
             println!("refresh: network_failure=true");
         }
     }

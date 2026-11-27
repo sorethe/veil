@@ -21,9 +21,7 @@
 
   const groups = $derived(groupRules(route?.rules ?? []));
 
-  const modeOptions = $derived(
-    (route?.modes ?? []).map((mode) => ({ value: mode, label: mode })),
-  );
+  const modeOptions = $derived((route?.modes ?? []).map((mode) => ({ value: mode, label: mode })));
 
   $effect(() => {
     const key = `${app.engine.status}:${app.engine.startedAt ?? 0}`;
@@ -33,6 +31,7 @@
   });
 
   function groupRules(rules: RouteRule[]): RuleGroup[] {
+    // eslint-disable-next-line svelte/prefer-svelte-reactivity -- local bucketing map, not reactive state
     const buckets = new Map<string, RouteRule[]>();
     for (const rule of rules) {
       const action = rule.action || "other";
@@ -90,13 +89,15 @@
     <span class="kicker">Routing</span>
     <h1 class="page-title">Rules</h1>
     <p class="page-desc">
-      The live route as reported by the engine. This view is read-only; rules come from the active profile.
+      The live route as reported by the engine. This view is read-only; rules come from the active
+      profile.
     </p>
   </div>
   <div class="head-actions">
     <span class="tag">read-only</span>
     <button type="button" class="btn" disabled={loading} onclick={() => void load()}>
-      <Icon name="refresh" size={12} /> {loading ? "Reading" : "Reload"}
+      <Icon name="refresh" size={12} />
+      {loading ? "Reading" : "Reload"}
     </button>
   </div>
 </div>
@@ -136,7 +137,9 @@
           disabled={switching}
           onchange={(mode) => void setMode(mode)}
         />
-        <span class="summary__hint">{switching ? "Applying…" : "Switches the live Clash mode."}</span>
+        <span class="summary__hint">
+          {switching ? "Applying…" : "Switches the live Clash mode."}
+        </span>
       {:else}
         <span class="mono summary__value">{route.mode ?? "—"}</span>
       {/if}
@@ -163,7 +166,13 @@
             <span class="panel__title">
               {group.label} · {group.rules.length}
             </span>
-            <span class="tag {group.key === 'reject' ? 'tag--error' : group.key === 'route' ? 'tag--accent' : ''}">
+            <span
+              class="tag {group.key === 'reject'
+                ? 'tag--error'
+                : group.key === 'route'
+                  ? 'tag--accent'
+                  : ''}"
+            >
               {group.key}
             </span>
           </div>
@@ -225,7 +234,9 @@
     {:else}
       <EmptyState
         title="No DNS rules"
-        description={route.dnsFinal ? `The engine reports only a final DNS outbound: ${route.dnsFinal}.` : "The engine reports no DNS rules."}
+        description={route.dnsFinal
+          ? `The engine reports only a final DNS outbound: ${route.dnsFinal}.`
+          : "The engine reports no DNS rules."}
         icon="routing"
       />
     {/if}

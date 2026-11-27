@@ -80,10 +80,7 @@ fn split_host_port(raw: &str) -> Result<(String, u16), String> {
 }
 
 fn query_map(url: &Url) -> HashMap<String, String> {
-    url.query_pairs()
-        .into_owned()
-        .map(|(k, v)| (k, v))
-        .collect()
+    url.query_pairs().into_owned().collect()
 }
 
 fn q_bool(q: &HashMap<String, String>, keys: &[&str]) -> bool {
@@ -260,7 +257,10 @@ fn parse_vless(link: &str) -> Result<(String, Value), String> {
     }
     let network = q.get("type").map(String::as_str).unwrap_or("tcp");
     let path = q.get("path").map(String::as_str);
-    let host_header = q.get("host").map(String::as_str).or_else(|| q.get("sni").map(String::as_str));
+    let host_header = q
+        .get("host")
+        .map(String::as_str)
+        .or_else(|| q.get("sni").map(String::as_str));
     let service = q.get("serviceName").map(String::as_str);
     if let Some(transport) = transport_for(
         network,
@@ -283,8 +283,8 @@ fn parse_vmess(link: &str) -> Result<(String, Value), String> {
     let payload = payload.split('#').next().unwrap_or(payload);
     let decoded = b64_string(payload)
         .map_err(|e| format!("invalid vmess payload (expected base64 JSON): {e}"))?;
-    let v: Value = serde_json::from_str(&decoded)
-        .map_err(|e| format!("invalid vmess JSON: {e}"))?;
+    let v: Value =
+        serde_json::from_str(&decoded).map_err(|e| format!("invalid vmess JSON: {e}"))?;
     let server = v
         .get("add")
         .and_then(Value::as_str)
@@ -335,12 +335,7 @@ fn parse_vmess(link: &str) -> Result<(String, Value), String> {
             v.get("allowInsecure").and_then(Value::as_str),
             Some("1") | Some("true")
         );
-        out["tls"] = tls_json(
-            sni,
-            insecure,
-            alpn,
-            v.get("fp").and_then(Value::as_str),
-        );
+        out["tls"] = tls_json(sni, insecure, alpn, v.get("fp").and_then(Value::as_str));
     }
     let network = v.get("net").and_then(Value::as_str).unwrap_or("tcp");
     let path = v.get("path").and_then(Value::as_str);
@@ -452,14 +447,14 @@ fn parse_ss(link: &str) -> Result<(String, Value), String> {
         let (host, port) = split_host_port(hostport)?;
         (method, password, host, port)
     } else {
-        let decoded = b64_string(rest)
-            .map_err(|e| format!("invalid legacy Shadowsocks link: {e}"))?;
+        let decoded =
+            b64_string(rest).map_err(|e| format!("invalid legacy Shadowsocks link: {e}"))?;
         let (userinfo, hostport) = decoded
             .rsplit_once('@')
             .ok_or_else(|| "invalid legacy Shadowsocks payload".to_string())?;
-        let (method, password) = userinfo
-            .split_once(':')
-            .ok_or_else(|| "legacy Shadowsocks payload must be method:password@host:port".to_string())?;
+        let (method, password) = userinfo.split_once(':').ok_or_else(|| {
+            "legacy Shadowsocks payload must be method:password@host:port".to_string()
+        })?;
         let (host, port) = split_host_port(hostport)?;
         (method.to_string(), password.to_string(), host, port)
     };
@@ -589,9 +584,7 @@ fn parse_http(link: &str) -> Result<(String, Value), String> {
         .host_str()
         .ok_or_else(|| "HTTP proxy link is missing a host".to_string())?;
     let tls = url.scheme() == "https";
-    let port = url
-        .port()
-        .unwrap_or(if tls { 443 } else { 8080 });
+    let port = url.port().unwrap_or(if tls { 443 } else { 8080 });
     let mut out = json!({
         "type": "http",
         "server": host,
@@ -633,14 +626,17 @@ fn parse_one(link: &str) -> Result<(String, Value), String> {
 /// "Proxy" selector and route.final = "Proxy".
 pub fn parse_links(text: &str) -> Result<LinkImport, String> {
     let mut outbounds: Vec<ParsedOutbound> = Vec::new();
-    let mut used = vec!["Proxy".to_string(), "direct".to_string(), "DIRECT".to_string()];
+    let mut used = vec![
+        "Proxy".to_string(),
+        "direct".to_string(),
+        "DIRECT".to_string(),
+    ];
     for (index, raw) in text.lines().enumerate() {
         let line = raw.trim().trim_end_matches('\r');
         if line.is_empty() || line.starts_with('#') || line.starts_with("//") {
             continue;
         }
-        let (name, outbound) = parse_one(line)
-            .map_err(|e| format!("line {}: {e}", index + 1))?;
+        let (name, outbound) = parse_one(line).map_err(|e| format!("line {}: {e}", index + 1))?;
         let tag = unique_tag(&name, &mut used);
         outbounds.push(ParsedOutbound { tag, outbound });
     }
@@ -758,7 +754,9 @@ mod tests {
         assert!(parse_one(&link).unwrap_err().contains("plugin"));
         let userinfo = STANDARD.encode("rc4-md5:pw");
         let link = format!("ss://{userinfo}@example.com:8388");
-        assert!(parse_one(&link).unwrap_err().contains("unsupported Shadowsocks method"));
+        assert!(parse_one(&link)
+            .unwrap_err()
+            .contains("unsupported Shadowsocks method"));
     }
 
     #[test]
@@ -840,10 +838,8 @@ http://c.example.com:8080
              http://proxy.example.com:8080"
         );
         let content = links_to_config_json(&text).unwrap();
-        let path = std::env::temp_dir().join(format!(
-            "veil-links-check-{}.json",
-            uuid::Uuid::new_v4()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("veil-links-check-{}.json", uuid::Uuid::new_v4()));
         std::fs::write(&path, content).unwrap();
         let result = crate::core::check(std::path::Path::new(&core), &path);
         let _ = std::fs::remove_file(&path);

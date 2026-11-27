@@ -115,17 +115,24 @@
     <span class="kicker">Diagnostics</span>
     <h1 class="page-title">System report</h1>
     <p class="page-desc">
-      A read-only probe of the core binary, desktop permissions, interfaces, DNS, and tray support. Nothing
-      here changes system state.
+      A read-only probe of the core binary, desktop permissions, interfaces, DNS, and tray support.
+      Nothing here changes system state.
     </p>
   </div>
   <div class="head-actions">
     {#if lastRun}<span class="mono small faint">last run {formatClock(lastRun)}</span>{/if}
-    <button type="button" class="btn" disabled={!diagnostics || copying} onclick={() => void copyReport()}>
-      <Icon name="copy" size={12} /> {copying ? "Copying" : "Copy report"}
+    <button
+      type="button"
+      class="btn"
+      disabled={!diagnostics || copying}
+      onclick={() => void copyReport()}
+    >
+      <Icon name="copy" size={12} />
+      {copying ? "Copying" : "Copy report"}
     </button>
     <button type="button" class="btn btn--primary" disabled={loading} onclick={() => void run()}>
-      <Icon name="refresh" size={12} /> {loading ? "Probing" : "Re-run"}
+      <Icon name="refresh" size={12} />
+      {loading ? "Probing" : "Re-run"}
     </button>
   </div>
 </div>
@@ -143,7 +150,9 @@
 
 {#if loading && !diagnostics}
   <section class="panel">
-    <div class="panel__body"><p class="muted small">Probing the core, permissions, and interfaces…</p></div>
+    <div class="panel__body">
+      <p class="muted small">Probing the core, permissions, and interfaces…</p>
+    </div>
   </section>
 {:else if !diagnostics}
   <section class="panel">
@@ -170,7 +179,11 @@
 
   <div class="diag-grid">
     <section class="panel" aria-label="Core">
-      <div class="panel__head"><span class="panel__title">Core</span><span class="tag">{diagnostics.core.ok ? "ok" : "failed"}</span></div>
+      <div class="panel__head">
+        <span class="panel__title">Core</span><span class="tag">
+          {diagnostics.core.ok ? "ok" : "failed"}
+        </span>
+      </div>
       <div class="panel__body">
         <dl class="deflist">
           <div class="deflist__row">
@@ -189,7 +202,9 @@
           </div>
           <div class="deflist__row">
             <dt class="deflist__term">Status</dt>
-            <dd class="deflist__value mono small">{diagnostics.core.ok ? "responds normally" : "unavailable"}</dd>
+            <dd class="deflist__value mono small">
+              {diagnostics.core.ok ? "responds normally" : "unavailable"}
+            </dd>
           </div>
           {#if diagnostics.core.error}
             <div class="deflist__row">
@@ -222,7 +237,9 @@
           </div>
           <div class="deflist__row">
             <dt class="deflist__term">Auto-redirect</dt>
-            <dd class="deflist__value mono small">{yesNo(diagnostics.capabilities.autoRedirect)}</dd>
+            <dd class="deflist__value mono small">
+              {yesNo(diagnostics.capabilities.autoRedirect)}
+            </dd>
           </div>
           <div class="deflist__row">
             <dt class="deflist__term">nftables</dt>
@@ -255,7 +272,11 @@
     </section>
 
     <section class="panel" aria-label="Permissions">
-      <div class="panel__head"><span class="panel__title">Permissions</span><span class="tag">user {diagnostics.permissions.user}</span></div>
+      <div class="panel__head">
+        <span class="panel__title">Permissions</span><span class="tag">
+          user {diagnostics.permissions.user}
+        </span>
+      </div>
       <div class="panel__body">
         <dl class="deflist">
           <div class="deflist__row">
@@ -307,7 +328,9 @@
     </section>
 
     <section class="panel" aria-label="DNS">
-      <div class="panel__head"><span class="panel__title">DNS</span><span class="tag">{diagnostics.dns.mode}</span></div>
+      <div class="panel__head">
+        <span class="panel__title">DNS</span><span class="tag">{diagnostics.dns.mode}</span>
+      </div>
       <div class="panel__body">
         {#if diagnostics.dns.servers.length}
           <ul class="server-list">
@@ -322,7 +345,11 @@
     </section>
 
     <section class="panel" aria-label="Tray">
-      <div class="panel__head"><span class="panel__title">Tray</span><span class="tag">{diagnostics.tray.available ? "available" : "unavailable"}</span></div>
+      <div class="panel__head">
+        <span class="panel__title">Tray</span><span class="tag">
+          {diagnostics.tray.available ? "available" : "unavailable"}
+        </span>
+      </div>
       <div class="panel__body">
         <p class="small break">{diagnostics.tray.detail || "No tray detail was reported."}</p>
         <p class="small faint tray-note">
@@ -332,7 +359,9 @@
     </section>
 
     <section class="panel" aria-label="Platform">
-      <div class="panel__head"><span class="panel__title">Desktop</span><span class="tag">platform</span></div>
+      <div class="panel__head">
+        <span class="panel__title">Desktop</span><span class="tag">platform</span>
+      </div>
       <div class="panel__body">
         <dl class="deflist">
           <div class="deflist__row">
@@ -389,9 +418,17 @@
                     <span class="faint small">no addresses</span>
                   {/if}
                 </td>
-                <td><span class="tag {iface.up ? 'tag--accent' : ''}">{iface.up ? "up" : "down"}</span></td>
+                <td>
+                  <span class="tag {iface.up ? 'tag--accent' : ''}">
+                    {iface.up ? "up" : "down"}
+                  </span>
+                </td>
                 <td class="ta-r">
-                  {#if iface.default}<span class="tag">default</span>{:else}<span class="faint small">—</span>{/if}
+                  {#if iface.default}<span class="tag">default</span>{:else}<span
+                      class="faint small"
+                    >
+                      —
+                    </span>{/if}
                 </td>
               </tr>
             {/each}
@@ -399,7 +436,11 @@
         </table>
       </div>
     {:else}
-      <EmptyState title="No interfaces reported" description="The backend returned an empty interface list." icon="diagnostics" />
+      <EmptyState
+        title="No interfaces reported"
+        description="The backend returned an empty interface list."
+        icon="diagnostics"
+      />
     {/if}
   </section>
 
@@ -427,7 +468,8 @@
   </section>
 
   <p class="diag-foot mono">
-    Report generated {lastRun ? formatDateTime(lastRun) : "—"} · values are reported by the backend, not inferred.
+    Report generated {lastRun ? formatDateTime(lastRun) : "—"} · values are reported by the backend, not
+    inferred.
   </p>
 {/if}
 

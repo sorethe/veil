@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Veil - Linux desktop proxy client powered by sing-box"
 authors = ["Veil"]
 edition = "2021"
-rust-version = "1.77"
+rust-version = "1.80"
 
 [lib]
 name = "veil_lib"

@@ -259,10 +259,7 @@ pub fn map_outbounds(value: &Value) -> Vec<Outbound> {
             _ => "other",
         }
         .to_string();
-        let now = proxy
-            .get("now")
-            .and_then(Value::as_str)
-            .map(str::to_string);
+        let now = proxy.get("now").and_then(Value::as_str).map(str::to_string);
         let options = proxy
             .get("all")
             .and_then(Value::as_array)
@@ -340,7 +337,11 @@ pub fn map_connections(value: &Value) -> Vec<Conn> {
                 .to_string();
             let rule = match c.get("rulePayload").and_then(Value::as_str) {
                 Some(p) if !p.is_empty() => {
-                    format!("{} ({})", c.get("rule").and_then(Value::as_str).unwrap_or(""), p)
+                    format!(
+                        "{} ({})",
+                        c.get("rule").and_then(Value::as_str).unwrap_or(""),
+                        p
+                    )
                 }
                 _ => c
                     .get("rule")
@@ -441,7 +442,9 @@ pub fn route_info(profile_content: Option<&str>, clash_mode: Option<String>) -> 
         let skip = ["action", "outbound", "type"];
         if let Some(rules) = route.get("rules").and_then(Value::as_array) {
             for (index, rule) in rules.iter().enumerate() {
-                let Some(obj) = rule.as_object() else { continue };
+                let Some(obj) = rule.as_object() else {
+                    continue;
+                };
                 let action = obj
                     .get("action")
                     .and_then(Value::as_str)
@@ -450,7 +453,10 @@ pub fn route_info(profile_content: Option<&str>, clash_mode: Option<String>) -> 
                 info.rules.push(RouteRule {
                     index,
                     action,
-                    outbound: obj.get("outbound").and_then(Value::as_str).map(str::to_string),
+                    outbound: obj
+                        .get("outbound")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
                     match_: summarize(obj, &skip),
                 });
             }
@@ -460,7 +466,9 @@ pub fn route_info(profile_content: Option<&str>, clash_mode: Option<String>) -> 
         info.dns_final = dns.get("final").and_then(Value::as_str).map(str::to_string);
         if let Some(rules) = dns.get("rules").and_then(Value::as_array) {
             for (index, rule) in rules.iter().enumerate() {
-                let Some(obj) = rule.as_object() else { continue };
+                let Some(obj) = rule.as_object() else {
+                    continue;
+                };
                 let action = obj
                     .get("action")
                     .and_then(Value::as_str)

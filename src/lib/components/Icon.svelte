@@ -27,5 +27,6 @@
   aria-hidden={label ? undefined : "true"}
 >
   {#if label}<title>{label}</title>{/if}
+  <!-- eslint-disable-next-line svelte/no-at-html-tags -- iconMarkup only returns constant SVG strings from the local icons map -->
   {@html iconMarkup(name)}
 </svg>

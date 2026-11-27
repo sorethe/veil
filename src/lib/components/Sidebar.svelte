@@ -49,7 +49,12 @@
 </script>
 
 <aside class="sidebar" aria-label="Application">
-  <button type="button" class="brand" onclick={() => app.setView("overview")} aria-label="Veil overview">
+  <button
+    type="button"
+    class="brand"
+    onclick={() => app.setView("overview")}
+    aria-label="Veil overview"
+  >
     <span class="brand__mark"><Mark size={23} /></span>
     <span class="brand__text">
       <span class="brand__name">Veil</span>
@@ -87,7 +92,8 @@
       </div>
       <p class="profile-block__name" title={profileName}>{profileName}</p>
       <p class="profile-block__state {`st-${app.engine.status}`}">
-        {statusWord(app.engine.status)}{#if app.engine.mode} · {app.engine.mode === "tun" ? "TUN" : "SYSTEM"}{/if}
+        {statusWord(app.engine.status)}{#if app.engine.mode}
+          · {app.engine.mode === "tun" ? "TUN" : "SYSTEM"}{/if}
       </p>
     </div>
 
@@ -196,7 +202,9 @@
     color: var(--muted);
     border-radius: 1px;
     text-align: left;
-    transition: color var(--fast) var(--ease), background-color var(--fast) var(--ease);
+    transition:
+      color var(--fast) var(--ease),
+      background-color var(--fast) var(--ease);
   }
 
   .nav__item:hover:not(.nav__item--active) {

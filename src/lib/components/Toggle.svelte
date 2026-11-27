@@ -51,7 +51,9 @@
     background: var(--field);
     border-radius: var(--radius);
     padding: 2px;
-    transition: background-color var(--fast) var(--ease), border-color var(--fast) var(--ease);
+    transition:
+      background-color var(--fast) var(--ease),
+      border-color var(--fast) var(--ease);
   }
 
   .toggle__thumb {
@@ -61,7 +63,9 @@
     background: var(--muted);
     border-radius: 1px;
     transform: translateX(0);
-    transition: transform var(--fast) var(--ease), background-color var(--fast) var(--ease);
+    transition:
+      transform var(--fast) var(--ease),
+      background-color var(--fast) var(--ease);
   }
 
   .toggle--on .toggle__track {

@@ -151,7 +151,10 @@ struct HelperOutput {
     value: Value,
 }
 
-fn parse_helper_response(output: &std::process::Output, action: &str) -> Result<HelperOutput, String> {
+fn parse_helper_response(
+    output: &std::process::Output,
+    action: &str,
+) -> Result<HelperOutput, String> {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     let combined = format!("{stdout}\n{stderr}");
@@ -299,11 +302,7 @@ impl Engine {
         })
     }
 
-    fn spawn_log_tailer(
-        self: &Arc<Self>,
-        path: PathBuf,
-        from_end: bool,
-    ) -> JoinHandle<()> {
+    fn spawn_log_tailer(self: &Arc<Self>, path: PathBuf, from_end: bool) -> JoinHandle<()> {
         let engine = self.clone();
         tokio::spawn(async move {
             let mut offset: u64 = 0;
@@ -466,14 +465,16 @@ impl Engine {
             .value
             .get("pid")
             .and_then(Value::as_u64)
-            .ok_or_else(|| "veil-helper start returned no pid".to_string())? as u32;
+            .ok_or_else(|| "veil-helper start returned no pid".to_string())?
+            as u32;
         self.register_task(self.spawn_log_tailer(log_file, false));
         Ok(pid)
     }
 
     async fn helper_stop(&self) -> Result<(), String> {
-        let helper = diagnostics::find_helper(self.resource_dir.as_deref())
-            .ok_or_else(|| "veil-helper is not installed; cannot stop the TUN engine".to_string())?;
+        let helper = diagnostics::find_helper(self.resource_dir.as_deref()).ok_or_else(|| {
+            "veil-helper is not installed; cannot stop the TUN engine".to_string()
+        })?;
         let pkexec = diagnostics::find_in_path("pkexec")
             .ok_or_else(|| "pkexec is not installed; cannot stop the TUN engine".to_string())?;
         if !Path::new(&paths::helper_pid_file()).exists() {
@@ -639,33 +640,30 @@ impl Engine {
                 if engine.snapshot().status != "connected" {
                     break;
                 }
-                match client.traffic().await {
-                    Ok(response) => {
-                        let mut stream = response.bytes_stream();
-                        let mut buffer = String::new();
-                        while let Some(chunk) = stream.next().await {
-                            if engine.snapshot().status != "connected" {
-                                return;
+                if let Ok(response) = client.traffic().await {
+                    let mut stream = response.bytes_stream();
+                    let mut buffer = String::new();
+                    while let Some(chunk) = stream.next().await {
+                        if engine.snapshot().status != "connected" {
+                            return;
+                        }
+                        let Ok(bytes) = chunk else { break };
+                        buffer.push_str(&String::from_utf8_lossy(&bytes));
+                        while let Some(idx) = buffer.find('\n') {
+                            let line: String = buffer[..idx].trim().to_string();
+                            buffer.drain(..=idx);
+                            if line.is_empty() {
+                                continue;
                             }
-                            let Ok(bytes) = chunk else { break };
-                            buffer.push_str(&String::from_utf8_lossy(&bytes));
-                            while let Some(idx) = buffer.find('\n') {
-                                let line: String = buffer[..idx].trim().to_string();
-                                buffer.drain(..=idx);
-                                if line.is_empty() {
-                                    continue;
-                                }
-                                if let Ok(value) = serde_json::from_str::<Value>(&line) {
-                                    let mut stats = engine.stats.lock().unwrap();
-                                    stats.up_speed =
-                                        value.get("up").and_then(Value::as_f64).unwrap_or(0.0);
-                                    stats.down_speed =
-                                        value.get("down").and_then(Value::as_f64).unwrap_or(0.0);
-                                }
+                            if let Ok(value) = serde_json::from_str::<Value>(&line) {
+                                let mut stats = engine.stats.lock().unwrap();
+                                stats.up_speed =
+                                    value.get("up").and_then(Value::as_f64).unwrap_or(0.0);
+                                stats.down_speed =
+                                    value.get("down").and_then(Value::as_f64).unwrap_or(0.0);
                             }
                         }
                     }
-                    Err(_) => {}
                 }
                 if engine.snapshot().status != "connected" {
                     break;
@@ -772,10 +770,7 @@ impl Engine {
                             continue;
                         }
                         if let Ok(value) = serde_json::from_str::<Value>(&line) {
-                            let level = value
-                                .get("type")
-                                .and_then(Value::as_str)
-                                .unwrap_or("info");
+                            let level = value.get("type").and_then(Value::as_str).unwrap_or("info");
                             let payload =
                                 value.get("payload").and_then(Value::as_str).unwrap_or("");
                             if !payload.is_empty() {
@@ -802,11 +797,7 @@ impl Engine {
         self.tasks.lock().unwrap().extend(tasks);
     }
 
-    async fn wait_health(
-        &self,
-        client: &ClashClient,
-        timeout: Duration,
-    ) -> Result<Value, String> {
+    async fn wait_health(&self, client: &ClashClient, timeout: Duration) -> Result<Value, String> {
         let deadline = tokio::time::Instant::now() + timeout;
         loop {
             let exited = {
@@ -868,7 +859,10 @@ impl Engine {
         profile_id_arg: Option<i64>,
     ) -> Result<EngineState, String> {
         let current = self.snapshot();
-        if matches!(current.status.as_str(), "connected" | "starting" | "stopping") {
+        if matches!(
+            current.status.as_str(),
+            "connected" | "starting" | "stopping"
+        ) {
             return Ok(current);
         }
         if current.status == "error" && self.has_runtime() {
@@ -898,11 +892,12 @@ impl Engine {
                 .ok_or_else(|| "no profiles yet; import or create one first".to_string())?,
         };
 
-        let core_path = core::find_core(settings.core_path.as_deref(), self.resource_dir.as_deref())
-            .ok_or_else(|| {
-                "sing-box binary not found. Set corePath in settings or install sing-box."
-                    .to_string()
-            })?;
+        let core_path =
+            core::find_core(settings.core_path.as_deref(), self.resource_dir.as_deref())
+                .ok_or_else(|| {
+                    "sing-box binary not found. Set corePath in settings or install sing-box."
+                        .to_string()
+                })?;
         self.reset_stats();
         let core_version = core::version(&core_path).ok();
 
@@ -1000,7 +995,11 @@ impl Engine {
                 mode: Some(mode),
                 profile_id: Some(profile.id),
                 profile_name: Some(profile.name.clone()),
-                started_at: if still_running { Some(started_at) } else { None },
+                started_at: if still_running {
+                    Some(started_at)
+                } else {
+                    None
+                },
                 pid: if still_running { Some(pid) } else { None },
                 error: Some(message.clone()),
                 proxy: None,
@@ -1060,10 +1059,13 @@ impl Engine {
             },
         };
         if let Err(e) = self.write_runtime_file(&runtime) {
-            self.logs
-                .push("warn", "engine", format!("could not persist runtime state: {e}"));
+            self.logs.push(
+                "warn",
+                "engine",
+                format!("could not persist runtime state: {e}"),
+            );
         }
-        let _ = self.db.set_last_profile_id(profile.id);
+        self.db.set_last_profile_id(profile.id);
 
         let state = self.set_state(EngineState {
             status: "connected".into(),
@@ -1261,11 +1263,7 @@ impl Engine {
                 self.snapshot().status.as_str(),
                 "starting" | "connected" | "stopping"
             )
-            || self
-                .snapshot()
-                .pid
-                .map(pid_alive)
-                .unwrap_or(false)
+            || self.snapshot().pid.map(pid_alive).unwrap_or(false)
     }
 
     pub fn is_shutting_down(&self) -> bool {
@@ -1292,17 +1290,20 @@ impl Engine {
         self.spawn_signal_listener(app, SignalKind::interrupt(), "SIGINT");
     }
 
-    fn spawn_signal_listener(self: &Arc<Self>, app: AppHandle, kind: SignalKind, name: &'static str) {
+    fn spawn_signal_listener(
+        self: &Arc<Self>,
+        app: AppHandle,
+        kind: SignalKind,
+        name: &'static str,
+    ) {
         let engine = self.clone();
         tauri::async_runtime::spawn(async move {
             let mut stream = match tokio::signal::unix::signal(kind) {
                 Ok(stream) => stream,
                 Err(e) => {
-                    engine.logs.push(
-                        "warn",
-                        "engine",
-                        format!("cannot listen for {name}: {e}"),
-                    );
+                    engine
+                        .logs
+                        .push("warn", "engine", format!("cannot listen for {name}: {e}"));
                     return;
                 }
             };
@@ -1429,7 +1430,10 @@ impl Engine {
             *self.clash.lock().unwrap() = None;
             self.remove_runtime_file();
             let _ = sysproxy::restore();
-            self.state.lock().unwrap().clone_from(&EngineState::default());
+            self.state
+                .lock()
+                .unwrap()
+                .clone_from(&EngineState::default());
             return;
         }
         let profile = self.db.get_profile(runtime.profile_id).ok().flatten();
@@ -1438,8 +1442,11 @@ impl Engine {
         } else {
             sysproxy::active_proxy_info()
         };
-        let core_version = core::info(self.settings.get().core_path.as_deref(), self.resource_dir.as_deref())
-            .version;
+        let core_version = core::info(
+            self.settings.get().core_path.as_deref(),
+            self.resource_dir.as_deref(),
+        )
+        .version;
         let state = self.set_state(EngineState {
             status: "connected".into(),
             mode: Some(runtime.mode.clone()),

@@ -64,7 +64,13 @@ pub fn helper_pid_file() -> PathBuf {
 }
 
 pub fn ensure_dirs() -> std::io::Result<()> {
-    for dir in [config_dir(), data_dir(), runtime_dir(), exports_dir(), logs_dir()] {
+    for dir in [
+        config_dir(),
+        data_dir(),
+        runtime_dir(),
+        exports_dir(),
+        logs_dir(),
+    ] {
         fs::create_dir_all(&dir)?;
         // Private user data: owner-only.
         let _ = fs::set_permissions(&dir, fs::Permissions::from_mode(0o700));

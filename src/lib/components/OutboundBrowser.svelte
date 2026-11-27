@@ -65,6 +65,7 @@
 
   // A filter belongs to the group that was open when it was typed.
   $effect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-expressions -- dependency read: reset the filter when the group changes
     selectedGroupTag;
     query = "";
   });
@@ -79,7 +80,11 @@
     }
     const value = outboundStore.delays[row.tag] ?? row.node?.delay ?? null;
     if (value === "error") {
-      return { text: "error", tone: "error", title: "The last delay test failed for this outbound" };
+      return {
+        text: "error",
+        tone: "error",
+        title: "The last delay test failed for this outbound",
+      };
     }
     if (value === null || value === undefined) {
       return { text: "—", tone: "untested", title: "Not tested in this session" };
@@ -133,12 +138,16 @@
 
     {#if selectedGroup}
       <div class="ob-selected" aria-live="polite">
-        <span class="kicker">{selectedGroup.kind === "urltest" ? "Automatic choice" : "Selected"}</span>
+        <span class="kicker">
+          {selectedGroup.kind === "urltest" ? "Automatic choice" : "Selected"}
+        </span>
         <p class="ob-selected__value">
           <span class="ob-selected__group mono">{selectedGroup.tag}</span>
           <Icon name="chevronRight" size={13} />
           {#if selectedGroup.now}
-            <span class="ob-selected__node mono" title={selectedGroup.now}>{selectedGroup.now}</span>
+            <span class="ob-selected__node mono" title={selectedGroup.now}>
+              {selectedGroup.now}
+            </span>
           {:else}
             <span class="ob-selected__node ob-selected__node--none mono">not reported</span>
           {/if}
@@ -203,7 +212,9 @@
             <p class="banner__title">Outbounds unavailable</p>
             <p class="banner__body mono">{outboundStore.error}</p>
           </div>
-          <button type="button" class="btn btn--sm" onclick={() => void outboundStore.load()}>Retry</button>
+          <button type="button" class="btn btn--sm" onclick={() => void outboundStore.load()}>
+            Retry
+          </button>
         </div>
       </div>
     {:else if outboundStore.loading && !outboundStore.items.length}
@@ -263,10 +274,9 @@
                 <span class="ob-row__type mono" title={row.node?.type ?? "Type not reported"}>
                   {row.node?.type ?? "type not reported"}
                 </span>
-                <span
-                  class="ob-row__delay mono ob-row__delay--{delay.tone}"
-                  title={delay.title}
-                >{delay.text}</span>
+                <span class="ob-row__delay mono ob-row__delay--{delay.tone}" title={delay.title}>
+                  {delay.text}
+                </span>
               </button>
             {:else}
               <div class="ob-row__main ob-row__main--static" title={readOnlyReason}>
@@ -277,10 +287,9 @@
                 <span class="ob-row__type mono" title={row.node?.type ?? "Type not reported"}>
                   {row.node?.type ?? "type not reported"}
                 </span>
-                <span
-                  class="ob-row__delay mono ob-row__delay--{delay.tone}"
-                  title={delay.title}
-                >{delay.text}</span>
+                <span class="ob-row__delay mono ob-row__delay--{delay.tone}" title={delay.title}>
+                  {delay.text}
+                </span>
               </div>
             {/if}
             <button
@@ -419,7 +428,9 @@
     padding: 7px 8px;
     border-bottom: 2px solid transparent;
     color: var(--muted);
-    transition: color var(--fast) var(--ease), border-color var(--fast) var(--ease);
+    transition:
+      color var(--fast) var(--ease),
+      border-color var(--fast) var(--ease);
   }
 
   .ob-group:hover {

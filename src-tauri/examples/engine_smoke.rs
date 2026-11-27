@@ -12,13 +12,13 @@
 //!   VEIL_SINGBOX=$PWD/vendor/sing-box-1.14.5-linux-amd64/sing-box \
 //!     cargo run --example engine_smoke --manifest-path src-tauri/Cargo.toml
 
+use futures_util::StreamExt;
 use std::io::{BufRead, BufReader};
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use futures_util::StreamExt;
 use veil_lib::clash::ClashClient;
 use veil_lib::configgen::{self, GenOptions};
 use veil_lib::core;

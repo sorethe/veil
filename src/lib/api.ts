@@ -236,7 +236,9 @@ export interface Validation {
 }
 
 /** Optional arguments are omitted rather than sent as null so Rust defaults apply. */
-function args(entries: Record<string, string | number | null | undefined>): Record<string, string | number> {
+function args(
+  entries: Record<string, string | number | null | undefined>,
+): Record<string, string | number> {
   const out: Record<string, string | number> = {};
   for (const [key, value] of Object.entries(entries)) {
     if (value !== null && value !== undefined && value !== "") out[key] = value;
@@ -259,8 +261,7 @@ export const api = {
   exportLogs: () => invoke<string>("export_logs"),
   getRoute: () => invoke<RouteInfo>("get_route"),
   getOutbounds: () => invoke<Outbound[]>("get_outbounds"),
-  selectOutbound: (group: string, tag: string) =>
-    invoke<null>("select_outbound", { group, tag }),
+  selectOutbound: (group: string, tag: string) => invoke<null>("select_outbound", { group, tag }),
   testDelay: (tag: string) => invoke<number>("test_delay", { tag }),
   setClashMode: (mode: string) => invoke<null>("set_clash_mode", { mode }),
 

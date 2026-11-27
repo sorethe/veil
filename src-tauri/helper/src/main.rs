@@ -104,7 +104,7 @@ fn core_info(core: Option<&Path>) -> Value {
                     let version = text
                         .lines()
                         .find_map(|line| line.trim().strip_prefix("sing-box version"))
-                        .map(|rest| rest.trim().split_whitespace().next().unwrap_or("").to_string());
+                        .map(|rest| rest.split_whitespace().next().unwrap_or("").to_string());
                     json!({
                         "path": path.to_string_lossy(),
                         "version": version,

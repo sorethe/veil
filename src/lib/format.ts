@@ -20,11 +20,7 @@ export function normalizeError(error: unknown): NormalizedError {
   if (typeof error === "object" && error !== null) {
     const rawCode = "code" in error ? error.code : undefined;
     const code =
-      typeof rawCode === "string"
-        ? rawCode
-        : typeof rawCode === "number"
-          ? String(rawCode)
-          : null;
+      typeof rawCode === "string" ? rawCode : typeof rawCode === "number" ? String(rawCode) : null;
     const rawMessage = "message" in error ? error.message : undefined;
     const message = typeof rawMessage === "string" && rawMessage.trim() ? rawMessage : null;
     const rawDetail = "detail" in error ? error.detail : undefined;
@@ -42,7 +38,11 @@ export function normalizeError(error: unknown): NormalizedError {
     }
   }
   if (error === null || error === undefined) {
-    return { code: null, message: "The backend reported an error without a message.", detail: null };
+    return {
+      code: null,
+      message: "The backend reported an error without a message.",
+      detail: null,
+    };
   }
   return { code: null, message: String(error), detail: null };
 }
@@ -86,7 +86,12 @@ export function formatClock(value: number): string {
   const millis = toMillis(value);
   if (!millis) return "—";
   const date = new Date(millis);
-  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+  return date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
 }
 
 export function formatDateTime(value: number): string {

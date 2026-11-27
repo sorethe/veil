@@ -18,8 +18,13 @@
   let now = $state(Date.now());
   let inFlight = false;
 
-  const networks = $derived(["all", ...Array.from(new Set(connections.map((conn) => conn.network).filter(Boolean)))]);
-  const filtered = $derived(connections.filter((conn) => matches(conn, query.trim().toLowerCase(), network)));
+  const networks = $derived([
+    "all",
+    ...Array.from(new Set(connections.map((conn) => conn.network).filter(Boolean))),
+  ]);
+  const filtered = $derived(
+    connections.filter((conn) => matches(conn, query.trim().toLowerCase(), network)),
+  );
   const live = $derived(app.engine.status === "connected");
 
   $effect(() => {
@@ -49,7 +54,15 @@
   function matches(conn: Conn, needle: string, networkFilter: string): boolean {
     if (networkFilter !== "all" && conn.network !== networkFilter) return false;
     if (!needle) return true;
-    return [conn.host, conn.destination, conn.process, conn.outbound, conn.rule, conn.protocol, conn.network]
+    return [
+      conn.host,
+      conn.destination,
+      conn.process,
+      conn.outbound,
+      conn.rule,
+      conn.protocol,
+      conn.network,
+    ]
       .join(" ")
       .toLowerCase()
       .includes(needle);
@@ -95,8 +108,8 @@
     <span class="kicker">Connections</span>
     <h1 class="page-title">Live streams</h1>
     <p class="page-desc">
-      Active connections reported by the engine. This view refreshes every 1.5 seconds only while the engine
-      is live and the window is visible.
+      Active connections reported by the engine. This view refreshes every 1.5 seconds only while
+      the engine is live and the window is visible.
     </p>
   </div>
   <div class="head-actions">
@@ -125,7 +138,9 @@
       description="Connection tracking begins when a session is live. Start one from Overview, then return here."
       icon="connections"
     >
-      <button type="button" class="btn btn--sm" onclick={() => navigate("overview")}>Overview</button>
+      <button type="button" class="btn btn--sm" onclick={() => navigate("overview")}>
+        Overview
+      </button>
     </EmptyState>
   </section>
 {:else if loading && !connections.length}
@@ -203,7 +218,9 @@
                 <td>
                   <div class="dest">
                     <span class="dest__host truncate" title={conn.host}>{conn.host || "—"}</span>
-                    <span class="dest__addr mono truncate" title={conn.destination}>{conn.destination}</span>
+                    <span class="dest__addr mono truncate" title={conn.destination}>
+                      {conn.destination}
+                    </span>
                   </div>
                 </td>
                 <td>
@@ -212,7 +229,11 @@
                     <span class="net__protocol mono">{conn.protocol}</span>
                   </div>
                 </td>
-                <td><span class="mono detail truncate process" title={conn.process}>{conn.process || "—"}</span></td>
+                <td>
+                  <span class="mono detail truncate process" title={conn.process}>
+                    {conn.process || "—"}
+                  </span>
+                </td>
                 <td><span class="mono detail">{conn.outbound}</span></td>
                 <td><span class="mono detail rule" title={conn.rule}>{conn.rule || "—"}</span></td>
                 <td class="ta-r">
@@ -221,7 +242,9 @@
                     <span>↓ {formatBytes(conn.download)}</span>
                   </div>
                 </td>
-                <td class="ta-r"><span class="mono detail nowrap">{formatAge(conn.start, now)}</span></td>
+                <td class="ta-r">
+                  <span class="mono detail nowrap">{formatAge(conn.start, now)}</span>
+                </td>
                 <td class="ta-r">
                   <button
                     type="button"

@@ -27,7 +27,9 @@
   let selectedId = $state<string | null>(null);
   let now = $state(Date.now());
 
-  const selectedProfile = $derived(app.profiles.find((profile) => String(profile.id) === selectedId) ?? null);
+  const selectedProfile = $derived(
+    app.profiles.find((profile) => String(profile.id) === selectedId) ?? null,
+  );
   const mode = $derived(app.settings?.mode ?? "system");
   const locked = $derived(app.connected || app.busy);
   const developerMode = $derived(app.settings?.developerMode === true);
@@ -131,7 +133,11 @@
     return app.stats.duration > 0 ? formatDuration(app.stats.duration) : "—";
   });
   const latencyLabel = $derived(
-    !app.connected ? "—" : app.stats.latency === null ? "not measured" : formatDelay(app.stats.latency),
+    !app.connected
+      ? "—"
+      : app.stats.latency === null
+        ? "not measured"
+        : formatDelay(app.stats.latency),
   );
   const connectionsLabel = $derived(app.connected ? String(app.stats.connections) : "—");
   const downSeries = $derived(app.history.map((sample) => sample.down));
@@ -159,7 +165,10 @@
   $effect(() => {
     const engineProfile = app.engine.profileId;
     const profiles = app.profiles;
-    if (engineProfile !== null && profiles.some((profile) => String(profile.id) === String(engineProfile))) {
+    if (
+      engineProfile !== null &&
+      profiles.some((profile) => String(profile.id) === String(engineProfile))
+    ) {
       const next = String(engineProfile);
       if (selectedId !== next) selectedId = next;
       return;
@@ -180,7 +189,11 @@
       return;
     }
     if (!engineReady) {
-      app.notify("error", "Engine is not ready", disabledReason ?? "The backend reports no Clash API support.");
+      app.notify(
+        "error",
+        "Engine is not ready",
+        disabledReason ?? "The backend reports no Clash API support.",
+      );
       return;
     }
     if (!modeReady) {
@@ -216,7 +229,11 @@
     if (!(event.key === "Enter" && (event.ctrlKey || event.metaKey))) return;
     if (importOpen) return;
     const target = event.target;
-    if (target instanceof HTMLElement && (target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+    if (
+      target instanceof HTMLElement &&
+      (target.tagName === "TEXTAREA" || target.isContentEditable)
+    )
+      return;
     event.preventDefault();
     if (app.connected || canConnect) void toggleConnection();
   }
@@ -240,7 +257,9 @@
       <Icon name="error" size={16} />
       <div class="grow">
         <p class="banner__title">Engine error</p>
-        <p class="banner__body mono">{app.engine.error ?? "The engine reported an error without a message."}</p>
+        <p class="banner__body mono">
+          {app.engine.error ?? "The engine reported an error without a message."}
+        </p>
       </div>
       <div class="row">
         {#if app.engine.pid !== null}
@@ -253,7 +272,9 @@
             Stop engine
           </button>
         {/if}
-        <button type="button" class="btn btn--sm" onclick={() => navigate("diagnostics")}>Diagnostics</button>
+        <button type="button" class="btn btn--sm" onclick={() => navigate("diagnostics")}>
+          Diagnostics
+        </button>
       </div>
     </div>
   {/if}
@@ -263,7 +284,8 @@
     <span class="kicker">No profiles</span>
     <h2 class="first-run__title">Import a configuration to begin.</h2>
     <p class="first-run__desc">
-      Add a sing-box config, subscription, share links, or QR image. Veil validates it locally before saving.
+      Add a sing-box config, subscription, share links, or QR image. Veil validates it locally
+      before saving.
     </p>
     <div class="first-run__actions">
       <button type="button" class="btn btn--primary" onclick={() => (importOpen = true)}>
@@ -289,7 +311,9 @@
       <Icon name="error" size={16} />
       <div class="grow">
         <p class="banner__title">Engine error</p>
-        <p class="banner__body mono">{app.engine.error ?? "The engine reported an error without a message."}</p>
+        <p class="banner__body mono">
+          {app.engine.error ?? "The engine reported an error without a message."}
+        </p>
       </div>
       <div class="row">
         {#if app.engine.pid !== null}
@@ -313,7 +337,9 @@
             Retry
           </button>
         {/if}
-        <button type="button" class="btn btn--sm" onclick={() => navigate("diagnostics")}>Diagnostics</button>
+        <button type="button" class="btn btn--sm" onclick={() => navigate("diagnostics")}>
+          Diagnostics
+        </button>
       </div>
     </div>
   {/if}
@@ -372,7 +398,12 @@
             <span class="kicker">Download</span>
             <span class="monitor__rate-value mono">{downSpeedLabel}</span>
             {#if app.connected && app.history.length > 1}
-              <Sparkline values={downSeries} tone={isLive ? "accent" : "muted"} label="Download speed history" height={20} />
+              <Sparkline
+                values={downSeries}
+                tone={isLive ? "accent" : "muted"}
+                label="Download speed history"
+                height={20}
+              />
             {/if}
           </div>
           <div class="monitor__rate">
@@ -399,7 +430,10 @@
           </div>
           <div class="monitor__stat">
             <dt class="kicker">Latency</dt>
-            <dd class="mono" class:monitor__stat-value--none={!app.connected || app.stats.latency === null}>
+            <dd
+              class="mono"
+              class:monitor__stat-value--none={!app.connected || app.stats.latency === null}
+            >
               {latencyLabel}
             </dd>
           </div>
@@ -506,7 +540,10 @@
 {/if}
 
 {#if importOpen}
-  <ProfileImport onclose={() => (importOpen = false)} onimported={(profile) => void onImported(profile)} />
+  <ProfileImport
+    onclose={() => (importOpen = false)}
+    onimported={(profile) => void onImported(profile)}
+  />
 {/if}
 
 <style>
@@ -693,7 +730,9 @@
     letter-spacing: 0.14em;
     text-transform: uppercase;
     clip-path: polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 9px 100%, 0 calc(100% - 9px));
-    transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease),
+    transition:
+      background-color var(--fast) var(--ease),
+      color var(--fast) var(--ease),
       border-color var(--fast) var(--ease);
   }
 

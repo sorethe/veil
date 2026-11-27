@@ -106,7 +106,11 @@
     developerMode = settings.developerMode === true;
   }
 
-  async function apply(field: string, patch: Partial<Settings>, success?: string): Promise<boolean> {
+  async function apply(
+    field: string,
+    patch: Partial<Settings>,
+    success?: string,
+  ): Promise<boolean> {
     errors[field] = null;
     const failure = await app.saveSettings(patch);
     if (failure) {
@@ -157,14 +161,19 @@
     const raw = intervalHours.trim();
     const value = Number(raw);
     if (!/^\d+$/.test(raw) || !Number.isInteger(value) || value < 0 || value > 720) {
-      errors.intervalHours = "Enter whole hours between 0 and 720. Zero disables scheduled refreshes.";
+      errors.intervalHours =
+        "Enter whole hours between 0 and 720. Zero disables scheduled refreshes.";
       return;
     }
     if (app.settings?.subscriptionIntervalHours === value) {
       errors.intervalHours = null;
       return;
     }
-    void apply("intervalHours", { subscriptionIntervalHours: value }, "Subscription interval saved");
+    void apply(
+      "intervalHours",
+      { subscriptionIntervalHours: value },
+      "Subscription interval saved",
+    );
   }
 
   async function commitCorePath(): Promise<void> {
@@ -273,8 +282,8 @@
     <span class="kicker">System</span>
     <h1 class="page-title">Settings</h1>
     <p class="page-desc">
-      Changes are written through the backend as soon as a control is committed. The sidebar theme toggle uses
-      the same setting.
+      Changes are written through the backend as soon as a control is committed. The sidebar theme
+      toggle uses the same setting.
     </p>
   </div>
   <div class="head-actions">
@@ -289,7 +298,9 @@
   <section class="settings-section" aria-labelledby="settings-appearance">
     <div class="section-head">
       <h2 class="section-title" id="settings-appearance">Appearance</h2>
-      <p class="section-desc">Dark is the default; the system option follows the desktop preference.</p>
+      <p class="section-desc">
+        Dark is the default; the system option follows the desktop preference.
+      </p>
     </div>
     <dl class="deflist">
       <div class="deflist__row">
@@ -308,18 +319,30 @@
   <section class="settings-section" aria-labelledby="settings-session">
     <div class="section-head">
       <h2 class="section-title" id="settings-session">Session</h2>
-      <p class="section-desc">Defaults for the next engine start. Ports and mode are read when a session begins.</p>
+      <p class="section-desc">
+        Defaults for the next engine start. Ports and mode are read when a session begins.
+      </p>
     </div>
     <dl class="deflist">
       <div class="deflist__row">
         <dt class="setting">
           <span class="setting__label">Default proxy mode</span>
-          <span class="setting__hint">System proxy covers cooperative apps; TUN covers the interface.</span>
+          <span class="setting__hint">
+            System proxy covers cooperative apps; TUN covers the interface.
+          </span>
         </dt>
         <dd class="setting__control">
-          <Segmented value={mode} options={modeOptions} label="Default proxy mode" onchange={changeMode} />
+          <Segmented
+            value={mode}
+            options={modeOptions}
+            label="Default proxy mode"
+            onchange={changeMode}
+          />
           {#if !tunAvailable}
-            <p class="inline-warning">{tunReason}{#if mode === "tun"} Choose System proxy before connecting.{/if}</p>
+            <p class="inline-warning">
+              {tunReason}{#if mode === "tun"}
+                Choose System proxy before connecting.{/if}
+            </p>
           {/if}
           {#if errors.mode}<p class="field__error" role="alert">{errors.mode}</p>{/if}
         </dd>
@@ -328,7 +351,9 @@
       <div class="deflist__row">
         <dt class="setting">
           <span class="setting__label">Mixed port</span>
-          <span class="setting__hint">HTTP and SOCKS5 share this loopback port. Applies to the next session.</span>
+          <span class="setting__hint">
+            HTTP and SOCKS5 share this loopback port. Applies to the next session.
+          </span>
         </dt>
         <dd class="setting__control">
           <input
@@ -361,7 +386,9 @@
             />
             <span class="toggle-line__state mono">{autoRedirect ? "on" : "off"}</span>
           </div>
-          {#if errors.autoRedirect}<p class="field__error" role="alert">{errors.autoRedirect}</p>{/if}
+          {#if errors.autoRedirect}<p class="field__error" role="alert">
+              {errors.autoRedirect}
+            </p>{/if}
         </dd>
       </div>
     </dl>
@@ -370,7 +397,9 @@
   <section class="settings-section" aria-labelledby="settings-startup">
     <div class="section-head">
       <h2 class="section-title" id="settings-startup">Startup & desktop</h2>
-      <p class="section-desc">Autostart is requested from the backend and may be refused outside a packaged install.</p>
+      <p class="section-desc">
+        Autostart is requested from the backend and may be refused outside a packaged install.
+      </p>
     </div>
     <dl class="deflist">
       <div class="deflist__row">
@@ -380,7 +409,11 @@
         </dt>
         <dd class="setting__control">
           <div class="toggle-line">
-            <Toggle checked={autostart} label="Start Veil on login" onchange={(next) => void changeAutostart(next)} />
+            <Toggle
+              checked={autostart}
+              label="Start Veil on login"
+              onchange={(next) => void changeAutostart(next)}
+            />
             <span class="toggle-line__state mono">{autostart ? "on" : "off"}</span>
           </div>
           {#if errors.autostart}<p class="field__error" role="alert">{errors.autostart}</p>{/if}
@@ -390,14 +423,22 @@
       <div class="deflist__row">
         <dt class="setting">
           <span class="setting__label">Connect on launch</span>
-          <span class="setting__hint">Start the last active profile when the application boots.</span>
+          <span class="setting__hint">
+            Start the last active profile when the application boots.
+          </span>
         </dt>
         <dd class="setting__control">
           <div class="toggle-line">
-            <Toggle checked={connectOnLaunch} label="Connect on launch" onchange={changeConnectOnLaunch} />
+            <Toggle
+              checked={connectOnLaunch}
+              label="Connect on launch"
+              onchange={changeConnectOnLaunch}
+            />
             <span class="toggle-line__state mono">{connectOnLaunch ? "on" : "off"}</span>
           </div>
-          {#if errors.connectOnLaunch}<p class="field__error" role="alert">{errors.connectOnLaunch}</p>{/if}
+          {#if errors.connectOnLaunch}<p class="field__error" role="alert">
+              {errors.connectOnLaunch}
+            </p>{/if}
         </dd>
       </div>
 
@@ -420,7 +461,9 @@
             />
             <span class="toggle-line__state mono">{minimizeToTray ? "on" : "off"}</span>
           </div>
-          {#if errors.minimizeToTray}<p class="field__error" role="alert">{errors.minimizeToTray}</p>{/if}
+          {#if errors.minimizeToTray}<p class="field__error" role="alert">
+              {errors.minimizeToTray}
+            </p>{/if}
         </dd>
       </div>
 
@@ -434,7 +477,9 @@
             <Toggle checked={notifications} label="Notifications" onchange={changeNotifications} />
             <span class="toggle-line__state mono">{notifications ? "on" : "off"}</span>
           </div>
-          {#if errors.notifications}<p class="field__error" role="alert">{errors.notifications}</p>{/if}
+          {#if errors.notifications}<p class="field__error" role="alert">
+              {errors.notifications}
+            </p>{/if}
         </dd>
       </div>
     </dl>
@@ -451,8 +496,8 @@
       </p>
       {#if !app.clashApiReady}
         <p class="inline-warning" role="alert">
-          The backend reports no Clash API capability. Veil needs it for health checks, stats, connections,
-          and outbounds; starting a session is disabled.
+          The backend reports no Clash API capability. Veil needs it for health checks, stats,
+          connections, and outbounds; starting a session is disabled.
         </p>
       {/if}
     </div>
@@ -460,7 +505,9 @@
       <div class="deflist__row">
         <dt class="setting">
           <span class="setting__label">Current session mode</span>
-          <span class="setting__hint">The live engine mode, or the saved default while disconnected.</span>
+          <span class="setting__hint">
+            The live engine mode, or the saved default while disconnected.
+          </span>
         </dt>
         <dd class="setting__control">
           <span class="mono small">
@@ -476,7 +523,9 @@
       <div class="deflist__row">
         <dt class="setting">
           <span class="setting__label">API port</span>
-          <span class="setting__hint">Local Clash API used for stats, connections, and outbound switching.</span>
+          <span class="setting__hint">
+            Local Clash API used for stats, connections, and outbound switching.
+          </span>
         </dt>
         <dd class="setting__control">
           <input
@@ -497,7 +546,9 @@
       <div class="deflist__row">
         <dt class="setting">
           <span class="setting__label">Core binary path</span>
-          <span class="setting__hint">Leave blank to use the bundled or PATH-discovered sing-box.</span>
+          <span class="setting__hint">
+            Leave blank to use the bundled or PATH-discovered sing-box.
+          </span>
         </dt>
         <dd class="setting__control">
           <div class="input-row">
@@ -511,7 +562,12 @@
               }}
             />
             <button type="button" class="btn" onclick={commitCorePath}>Apply</button>
-            <button type="button" class="btn" disabled={detecting} onclick={() => void detectCore()}>
+            <button
+              type="button"
+              class="btn"
+              disabled={detecting}
+              onclick={() => void detectCore()}
+            >
               {detecting ? "Detecting" : "Detect"}
             </button>
           </div>
@@ -526,7 +582,11 @@
           <span class="setting__hint">Engine verbosity. Applies to the next session.</span>
         </dt>
         <dd class="setting__control">
-          <select class="select" aria-label="Log level" onchange={(event) => changeLogLevel(event.currentTarget.value)}>
+          <select
+            class="select"
+            aria-label="Log level"
+            onchange={(event) => changeLogLevel(event.currentTarget.value)}
+          >
             {#each logLevels as level (level)}
               <option value={level} selected={level === logLevel}>{level}</option>
             {/each}
@@ -539,8 +599,8 @@
         <dt class="setting">
           <span class="setting__label">Developer mode</span>
           <span class="setting__hint">
-            Reveals engine PID, core version/path, Clash API port, and profile ID in Overview's Connection
-            details. It never changes connection behavior.
+            Reveals engine PID, core version/path, Clash API port, and profile ID in Overview's
+            Connection details. It never changes connection behavior.
           </span>
         </dt>
         <dd class="setting__control">
@@ -548,7 +608,9 @@
             <Toggle checked={developerMode} label="Developer mode" onchange={changeDeveloperMode} />
             <span class="toggle-line__state mono">{developerMode ? "on" : "off"}</span>
           </div>
-          {#if errors.developerMode}<p class="field__error" role="alert">{errors.developerMode}</p>{/if}
+          {#if errors.developerMode}<p class="field__error" role="alert">
+              {errors.developerMode}
+            </p>{/if}
         </dd>
       </div>
     </dl>
@@ -557,13 +619,17 @@
   <section class="settings-section" aria-labelledby="settings-subscriptions">
     <div class="section-head">
       <h2 class="section-title" id="settings-subscriptions">Subscriptions</h2>
-      <p class="section-desc">Only profiles marked for auto-update are refreshed by the backend scheduler.</p>
+      <p class="section-desc">
+        Only profiles marked for auto-update are refreshed by the backend scheduler.
+      </p>
     </div>
     <dl class="deflist">
       <div class="deflist__row">
         <dt class="setting">
           <span class="setting__label">Refresh interval</span>
-          <span class="setting__hint">Hours between scheduled refreshes. Zero disables the schedule.</span>
+          <span class="setting__hint">
+            Hours between scheduled refreshes. Zero disables the schedule.
+          </span>
         </dt>
         <dd class="setting__control">
           <div class="input-with-unit">
@@ -580,7 +646,9 @@
             />
             <span class="unit mono">h</span>
           </div>
-          {#if errors.intervalHours}<p class="field__error" role="alert">{errors.intervalHours}</p>{/if}
+          {#if errors.intervalHours}<p class="field__error" role="alert">
+              {errors.intervalHours}
+            </p>{/if}
         </dd>
       </div>
     </dl>
@@ -589,7 +657,9 @@
   <section class="settings-section" aria-labelledby="settings-language">
     <div class="section-head">
       <h2 class="section-title" id="settings-language">Language</h2>
-      <p class="section-desc">Only English is implemented today; additional languages are planned.</p>
+      <p class="section-desc">
+        Only English is implemented today; additional languages are planned.
+      </p>
     </div>
     <dl class="deflist">
       <div class="deflist__row">
@@ -599,7 +669,9 @@
         </dt>
         <dd class="setting__control">
           <span class="mono small">English</span>
-          <p class="setting__hint">Only English is implemented; additional languages are planned.</p>
+          <p class="setting__hint">
+            Only English is implemented; additional languages are planned.
+          </p>
         </dd>
       </div>
     </dl>
@@ -607,7 +679,8 @@
 </div>
 
 <p class="settings-foot mono">
-  Backend state is authoritative. A rejected change leaves the previous value in place and reports the error here.
+  Backend state is authoritative. A rejected change leaves the previous value in place and reports
+  the error here.
 </p>
 
 <style>

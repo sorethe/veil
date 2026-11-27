@@ -465,7 +465,9 @@ hr {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   white-space: nowrap;
-  transition: background-color var(--fast) var(--ease), border-color var(--fast) var(--ease),
+  transition:
+    background-color var(--fast) var(--ease),
+    border-color var(--fast) var(--ease),
     color var(--fast) var(--ease);
 }
 
@@ -534,7 +536,9 @@ hr {
   border: 1px solid transparent;
   border-radius: var(--radius);
   color: var(--muted);
-  transition: color var(--fast) var(--ease), background-color var(--fast) var(--ease),
+  transition:
+    color var(--fast) var(--ease),
+    background-color var(--fast) var(--ease),
     border-color var(--fast) var(--ease);
 }
 
@@ -567,7 +571,9 @@ hr {
   color: var(--text);
   font-family: var(--font-body);
   font-size: var(--fs-sm);
-  transition: border-color var(--fast) var(--ease), background-color var(--fast) var(--ease);
+  transition:
+    border-color var(--fast) var(--ease),
+    background-color var(--fast) var(--ease);
 }
 
 .input::placeholder,
@@ -602,10 +608,15 @@ hr {
 .select {
   appearance: none;
   padding-right: 28px;
-  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted) 50%),
     linear-gradient(135deg, var(--muted) 50%, transparent 50%);
-  background-position: calc(100% - 14px) 13px, calc(100% - 10px) 13px;
-  background-size: 4px 4px, 4px 4px;
+  background-position:
+    calc(100% - 14px) 13px,
+    calc(100% - 10px) 13px;
+  background-size:
+    4px 4px,
+    4px 4px;
   background-repeat: no-repeat;
 }
 

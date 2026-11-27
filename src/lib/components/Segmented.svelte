@@ -65,7 +65,9 @@
     color: var(--muted);
     border: 1px solid transparent;
     border-radius: 1px;
-    transition: color var(--fast) var(--ease), background-color var(--fast) var(--ease);
+    transition:
+      color var(--fast) var(--ease),
+      background-color var(--fast) var(--ease);
   }
 
   .segmented__item:hover:not(:disabled) {

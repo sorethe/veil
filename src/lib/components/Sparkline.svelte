@@ -43,7 +43,7 @@
   <line class="spark__grid" x1="0" y1="18" x2="120" y2="18" opacity="0.5" />
   <line class="spark__grid" x1="0" y1="2" x2="120" y2="2" opacity="0.5" />
   {#if points}
-    <polyline class="spark__line" points={points} vector-effect="non-scaling-stroke" />
+    <polyline class="spark__line" {points} vector-effect="non-scaling-stroke" />
   {/if}
 </svg>
 

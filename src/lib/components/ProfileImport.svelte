@@ -6,7 +6,8 @@
   import Icon from "./Icon.svelte";
   import Modal from "./Modal.svelte";
 
-  let { onclose, onimported }: { onclose: () => void; onimported: (profile: Profile) => void } = $props();
+  let { onclose, onimported }: { onclose: () => void; onimported: (profile: Profile) => void } =
+    $props();
 
   type Tab = "paste" | "file" | "subscription" | "links" | "qr";
 
@@ -156,7 +157,11 @@
       if (tab === "paste") {
         profile = await api.importJson(fallbackName("Pasted profile"), content);
       } else if (tab === "file") {
-        profile = await api.importJson(fallbackName("Imported file"), content, fileName || undefined);
+        profile = await api.importJson(
+          fallbackName("Imported file"),
+          content,
+          fileName || undefined,
+        );
       } else if (tab === "subscription") {
         profile = await api.importSubscription(url.trim(), name.trim() || undefined);
       } else if (tab === "links") {
@@ -201,7 +206,11 @@
 
     <div id="import-panel" role="tabpanel" aria-labelledby={`tab-${tab}`} class="import__panel">
       {#if tab === "paste"}
-        <Field label="Config JSON" hint="Paste a complete sing-box configuration." forId="import-json">
+        <Field
+          label="Config JSON"
+          hint="Paste a complete sing-box configuration."
+          forId="import-json"
+        >
           <div class="row row--wrap">
             <textarea
               id="import-json"
@@ -209,15 +218,19 @@
               spellcheck="false"
               placeholder={'{\n  "outbounds": [ ... ]\n}'}
               bind:value={content}
-              oninput={() => (validation = null)}
-            ></textarea>
+              oninput={() => (validation = null)}></textarea>
           </div>
         </Field>
         <div class="row row--wrap">
           <button type="button" class="btn btn--sm" onclick={() => void pasteFromClipboard()}>
             <Icon name="clipboard" size={12} /> Read clipboard
           </button>
-          <button type="button" class="btn btn--sm" disabled={validating || !content.trim()} onclick={() => void validate()}>
+          <button
+            type="button"
+            class="btn btn--sm"
+            disabled={validating || !content.trim()}
+            onclick={() => void validate()}
+          >
             {validating ? "Validating" : "Validate"}
           </button>
         </div>
@@ -237,7 +250,9 @@
           <Icon name="file" size={20} />
           <p class="dropzone__title">{fileName || "Drop a config file here"}</p>
           <p class="dropzone__hint">JSON read as text, kept local until imported.</p>
-          <button type="button" class="btn btn--sm" onclick={() => fileInput?.click()}>Choose file</button>
+          <button type="button" class="btn btn--sm" onclick={() => fileInput?.click()}>
+            Choose file
+          </button>
           <input
             type="file"
             class="sr-only"
@@ -256,7 +271,12 @@
           </p>
         {/if}
         <div class="row row--wrap">
-          <button type="button" class="btn btn--sm" disabled={validating || !content.trim()} onclick={() => void validate()}>
+          <button
+            type="button"
+            class="btn btn--sm"
+            disabled={validating || !content.trim()}
+            onclick={() => void validate()}
+          >
             {validating ? "Validating" : "Validate"}
           </button>
         </div>
@@ -287,14 +307,18 @@
             spellcheck="false"
             placeholder="vless://…"
             bind:value={links}
-            oninput={() => (validation = null)}
-          ></textarea>
+            oninput={() => (validation = null)}></textarea>
         </Field>
         <div class="row row--wrap">
           <button type="button" class="btn btn--sm" onclick={() => void pasteFromClipboard()}>
             <Icon name="clipboard" size={12} /> Read clipboard
           </button>
-          <button type="button" class="btn btn--sm" disabled={validating || !links.trim()} onclick={() => void validate()}>
+          <button
+            type="button"
+            class="btn btn--sm"
+            disabled={validating || !links.trim()}
+            onclick={() => void validate()}
+          >
             {validating ? "Validating" : "Validate"}
           </button>
         </div>
@@ -314,7 +338,9 @@
           <Icon name="qr" size={20} />
           <p class="dropzone__title">{imageName || "Drop a QR image here"}</p>
           <p class="dropzone__hint">PNG or JPEG. The backend decodes it locally.</p>
-          <button type="button" class="btn btn--sm" onclick={() => qrInput?.click()}>Choose image</button>
+          <button type="button" class="btn btn--sm" onclick={() => qrInput?.click()}>
+            Choose image
+          </button>
           <input
             type="file"
             class="sr-only"
@@ -329,7 +355,11 @@
         </div>
       {/if}
 
-      <Field label="Profile name" hint="Optional; derived from the file or source when left blank." forId="import-name">
+      <Field
+        label="Profile name"
+        hint="Optional; derived from the file or source when left blank."
+        forId="import-name"
+      >
         <input id="import-name" class="input" bind:value={name} placeholder="Name" />
       </Field>
 
@@ -344,7 +374,9 @@
             <p class="import__outbounds mono">{validation.outbounds.join("  ·  ")}</p>
           {/if}
         {:else}
-          <p class="import__error" role="alert">{validation.error ?? "The backend rejected this config."}</p>
+          <p class="import__error" role="alert">
+            {validation.error ?? "The backend rejected this config."}
+          </p>
         {/if}
       {/if}
 

@@ -1,4 +1,5 @@
 <script module lang="ts">
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity -- plain cache shared across mounts; reactivity is not wanted here
   const countCache = new Map<string, number | { error: string }>();
 </script>
 
@@ -120,7 +121,9 @@
 
   function sourceLabel(profile: Profile): string {
     if (profile.kind === "subscription") {
-      return profile.subscriptionUrl ? hostOf(profile.subscriptionUrl) : profile.source || "subscription";
+      return profile.subscriptionUrl
+        ? hostOf(profile.subscriptionUrl)
+        : profile.source || "subscription";
     }
     if (profile.kind === "links") return "share links";
     if (profile.source && profile.source !== "inline" && profile.source !== "manual") {
@@ -165,11 +168,7 @@
     try {
       await api.setProfileAutoUpdate(profile.id, enabled);
       await app.refreshProfiles();
-      app.notify(
-        "success",
-        enabled ? "Auto-update enabled" : "Auto-update disabled",
-        profile.name,
-      );
+      app.notify("success", enabled ? "Auto-update enabled" : "Auto-update disabled", profile.name);
     } catch (error) {
       app.notify("error", "Could not change auto-update", errorMessage(error));
     } finally {
@@ -235,8 +234,8 @@
     <span class="kicker">Library</span>
     <h1 class="page-title">Profiles</h1>
     <p class="page-desc">
-      Configurations are stored locally and validated by the engine before use. One profile is applied per
-      session.
+      Configurations are stored locally and validated by the engine before use. One profile is
+      applied per session.
     </p>
   </div>
   <div class="head-actions">
@@ -260,7 +259,9 @@
           : "The core lacks the Clash API capability Veil needs for session health and telemetry."}
       </p>
     </div>
-    <button type="button" class="btn btn--sm" onclick={() => navigate("diagnostics")}>Diagnostics</button>
+    <button type="button" class="btn btn--sm" onclick={() => navigate("diagnostics")}>
+      Diagnostics
+    </button>
   </div>
 {/if}
 
@@ -274,7 +275,12 @@
         Stop the process before starting a new session.
       </p>
     </div>
-    <button type="button" class="btn btn--sm" disabled={app.connectBusy} onclick={() => void app.disconnect()}>
+    <button
+      type="button"
+      class="btn btn--sm"
+      disabled={app.connectBusy}
+      onclick={() => void app.disconnect()}
+    >
       Stop engine
     </button>
   </div>
@@ -303,7 +309,8 @@
           disabled={refreshBusy}
           onclick={() => void refreshList()}
         >
-          <Icon name="refresh" size={12} /> {refreshBusy ? "Refreshing" : "Refresh"}
+          <Icon name="refresh" size={12} />
+          {refreshBusy ? "Refreshing" : "Refresh"}
         </button>
       </div>
     </div>
@@ -343,7 +350,9 @@
                   {sourceLabel(profile)}
                 </span>
                 {#if profile.lastError}
-                  <span class="profile-error truncated" title={profile.lastError}>{profile.lastError}</span>
+                  <span class="profile-error truncated" title={profile.lastError}>
+                    {profile.lastError}
+                  </span>
                 {/if}
               </td>
               <td class="ta-r">
@@ -357,7 +366,9 @@
               </td>
               <td>
                 <div class="updated">
-                  <span class="detail" title={formatDateTime(profile.updatedAt)}>{formatRelative(profile.updatedAt)}</span>
+                  <span class="detail" title={formatDateTime(profile.updatedAt)}>
+                    {formatRelative(profile.updatedAt)}
+                  </span>
                   <span class="meta-sub mono">{formatBytes(profile.size)}</span>
                 </div>
               </td>
@@ -398,7 +409,9 @@
                     type="button"
                     class="icon-btn"
                     class:row-actions__live={isCurrent(profile) && app.connected}
-                    aria-label={isCurrent(profile) && app.connected ? `Open ${profile.name}` : `Connect ${profile.name}`}
+                    aria-label={isCurrent(profile) && app.connected
+                      ? `Open ${profile.name}`
+                      : `Connect ${profile.name}`}
                     title={connectTitle(profile)}
                     disabled={connectDisabled(profile)}
                     onclick={() => void connect(profile)}
@@ -457,7 +470,9 @@
     <div class="panel__foot">
       <p class="small faint note">{autoUpdateNote}</p>
       {#if app.connected}
-        <p class="small faint note">A live session is running; disconnect before switching profiles.</p>
+        <p class="small faint note">
+          A live session is running; disconnect before switching profiles.
+        </p>
       {/if}
     </div>
   </section>
@@ -479,7 +494,12 @@
 {/if}
 
 {#if duplicateOf}
-  <Modal title="Duplicate profile" subtitle={duplicateOf.name} onclose={() => (duplicateOf = null)} width="440px">
+  <Modal
+    title="Duplicate profile"
+    subtitle={duplicateOf.name}
+    onclose={() => (duplicateOf = null)}
+    width="440px"
+  >
     <div class="stack">
       <Field label="New name" forId="duplicate-name">
         <input
@@ -516,8 +536,8 @@
   >
     <div class="stack">
       <p class="small">
-        This removes the stored config from Veil. A running session is not stopped automatically; disconnect
-        first if this profile is live.
+        This removes the stored config from Veil. A running session is not stopped automatically;
+        disconnect first if this profile is live.
       </p>
       {#if deleteError}<p class="modal-error" role="alert">{deleteError}</p>{/if}
     </div>

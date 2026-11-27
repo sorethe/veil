@@ -72,7 +72,8 @@ impl Db {
             for suffix in ["-wal", "-shm"] {
                 let sidecar = PathBuf::from(format!("{}{suffix}", path.display()));
                 if sidecar.exists() {
-                    let _ = std::fs::set_permissions(&sidecar, std::fs::Permissions::from_mode(0o600));
+                    let _ =
+                        std::fs::set_permissions(&sidecar, std::fs::Permissions::from_mode(0o600));
                 }
             }
         }
@@ -139,7 +140,9 @@ impl Db {
     pub fn get_profile(&self, id: i64) -> Result<Option<Profile>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
-            .prepare(&format!("SELECT {PROFILE_COLS} FROM profiles WHERE id = ?1"))
+            .prepare(&format!(
+                "SELECT {PROFILE_COLS} FROM profiles WHERE id = ?1"
+            ))
             .map_err(|e| e.to_string())?;
         stmt.query_row(params![id], row_to_profile)
             .optional()
@@ -223,11 +226,8 @@ impl Db {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM profiles WHERE id = ?1", params![id])
             .map_err(|e| e.to_string())?;
-        conn.execute(
-            "DELETE FROM selections WHERE profile_id = ?1",
-            params![id],
-        )
-        .map_err(|e| e.to_string())?;
+        conn.execute("DELETE FROM selections WHERE profile_id = ?1", params![id])
+            .map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -399,14 +399,8 @@ impl Db {
                 .get("autoUpdate")
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
-            let created = item
-                .get("createdAt")
-                .and_then(Value::as_i64)
-                .unwrap_or(ts);
-            let updated = item
-                .get("updatedAt")
-                .and_then(Value::as_i64)
-                .unwrap_or(ts);
+            let created = item.get("createdAt").and_then(Value::as_i64).unwrap_or(ts);
+            let updated = item.get("updatedAt").and_then(Value::as_i64).unwrap_or(ts);
             tx.execute(
                 "INSERT INTO profiles (name, kind, source, content, subscription_url, auto_update, updated_at, created_at, last_error)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL)",
@@ -503,7 +497,8 @@ mod tests {
             .unwrap();
         let refreshed = db.get_profile(p.id).unwrap().unwrap();
         assert_eq!(refreshed.last_error.as_deref(), Some("network down"));
-        db.set_subscription_result(p.id, Some(SAMPLE), None).unwrap();
+        db.set_subscription_result(p.id, Some(SAMPLE), None)
+            .unwrap();
         assert!(db.get_profile(p.id).unwrap().unwrap().last_error.is_none());
         // Force due by moving updated_at into the past.
         {
@@ -527,7 +522,9 @@ mod tests {
         let db2 = Db::open_in_memory().unwrap();
         assert_eq!(db2.import_backup(&backup).unwrap(), 1);
         assert_eq!(db2.list_profiles().unwrap()[0].name, "One");
-        assert!(db2.import_backup("{\"profiles\":[{\"name\":\"x\",\"content\":\"nope\"}]}").is_err());
+        assert!(db2
+            .import_backup("{\"profiles\":[{\"name\":\"x\",\"content\":\"nope\"}]}")
+            .is_err());
     }
 
     #[test]

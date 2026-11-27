@@ -76,7 +76,12 @@ impl CommandError {
         let lower = message.to_ascii_lowercase();
         let code = if contains_any(
             &lower,
-            &["not connected", "not ready", "still running", "already running"],
+            &[
+                "not connected",
+                "not ready",
+                "still running",
+                "already running",
+            ],
         ) {
             ErrorCode::NotReady
         } else if contains_any(
@@ -166,7 +171,12 @@ impl CommandError {
         let lower = message.to_ascii_lowercase();
         let code = if contains_any(
             &lower,
-            &["still running", "already running", "not connected", "not ready"],
+            &[
+                "still running",
+                "already running",
+                "not connected",
+                "not ready",
+            ],
         ) {
             ErrorCode::NotReady
         } else if contains_any(

@@ -65,14 +65,9 @@ impl Recorder {
     }
 }
 
+#[derive(Default)]
 struct KillGuard {
     pid: Option<u32>,
-}
-
-impl Default for KillGuard {
-    fn default() -> Self {
-        Self { pid: None }
-    }
 }
 
 impl KillGuard {
@@ -178,7 +173,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "route": { "final": "direct" }
     })
     .to_string();
-    let profile = db.create_profile("Lifecycle Direct", "local", &content, "harness", None, false)?;
+    let profile = db.create_profile(
+        "Lifecycle Direct",
+        "local",
+        &content,
+        "harness",
+        None,
+        false,
+    )?;
     let logs = Arc::new(LogStore::new());
     let recorder = Arc::new(Recorder::default());
     let sink: Arc<dyn EventSink> = recorder.clone();
@@ -240,11 +242,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let stats_event = stats_event.expect("engine://stats event while connected");
     println!("stats event: {stats_event}");
-    for key in ["up", "down", "upSpeed", "downSpeed", "connections", "duration"] {
-        assert!(
-            stats_event.get(key).is_some(),
-            "stats event missing {key}"
-        );
+    for key in [
+        "up",
+        "down",
+        "upSpeed",
+        "downSpeed",
+        "connections",
+        "duration",
+    ] {
+        assert!(stats_event.get(key).is_some(), "stats event missing {key}");
     }
 
     // 4. Graceful disconnect: stopping -> idle, process gone, runtime clean.
@@ -255,7 +261,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("disconnect status events: {stop_states:?}");
     assert!(stop_states.contains(&"stopping".to_string()));
     assert_eq!(stop_states.last().map(String::as_str), Some("idle"));
-    assert!(!pid_alive(pid), "sing-box pid must be gone after disconnect");
+    assert!(
+        !pid_alive(pid),
+        "sing-box pid must be gone after disconnect"
+    );
     assert!(!paths::runtime_file_path().exists());
     assert!(!paths::runtime_config_path().exists());
     guard.disarm();

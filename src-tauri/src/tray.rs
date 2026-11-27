@@ -72,7 +72,12 @@ impl Tray for VeilTray {
                 ..Default::default()
             }),
             MenuItem::Standard(StandardItem {
-                label: if running { "Connect (already connected)" } else { "Connect" }.into(),
+                label: if running {
+                    "Connect (already connected)"
+                } else {
+                    "Connect"
+                }
+                .into(),
                 enabled: can_connect,
                 activate: Box::new(move |_| {
                     let app = connect_app.clone();

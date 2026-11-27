@@ -64,10 +64,18 @@ fn redact(message: &str, secrets: &[String]) -> String {
             out = out.replace(secret.as_str(), "<redacted>");
         }
     }
-    out = USERINFO_RE.replace_all(&out, "$scheme***:***@").into_owned();
+    out = USERINFO_RE
+        .replace_all(&out, "$scheme***:***@")
+        .into_owned();
     out = KV_RE.replace_all(&out, "$1$2***").into_owned();
     out = QUERY_RE.replace_all(&out, "$base?<redacted>").into_owned();
     out
+}
+
+impl Default for LogStore {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl LogStore {

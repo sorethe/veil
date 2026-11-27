@@ -90,7 +90,12 @@ pub fn find_core(explicit: Option<&str>, resource_dir: Option<&Path>) -> Option<
             // e.g. src-tauri/target/release/veil -> project root
             for ancestor in dir.ancestors().take(4) {
                 candidates.push(ancestor.join("resources").join("sing-box"));
-                candidates.push(ancestor.join("src-tauri").join("resources").join("sing-box"));
+                candidates.push(
+                    ancestor
+                        .join("src-tauri")
+                        .join("resources")
+                        .join("sing-box"),
+                );
                 candidates.push(ancestor.join("sing-box"));
             }
         }
@@ -124,7 +129,7 @@ pub fn probe(core: &Path) -> Result<(String, Vec<String>), String> {
     for line in text.lines() {
         let trimmed = line.trim();
         if let Some(rest) = trimmed.strip_prefix("sing-box version") {
-            let v = rest.trim().split_whitespace().next().unwrap_or("").to_string();
+            let v = rest.split_whitespace().next().unwrap_or("").to_string();
             if !v.is_empty() {
                 version = Some(v);
             }
@@ -241,7 +246,10 @@ pub fn capabilities_for(core: Option<&Path>) -> EngineCapabilities {
 
 pub fn engine_info(explicit: Option<&str>, resource_dir: Option<&Path>) -> EngineInfo {
     let core_path = find_core(explicit, resource_dir);
-    let version = core_path.as_deref().and_then(|path| probe(path).ok()).map(|(v, _)| v);
+    let version = core_path
+        .as_deref()
+        .and_then(|path| probe(path).ok())
+        .map(|(v, _)| v);
     let capabilities = capabilities_for(core_path.as_deref());
     EngineInfo {
         id: "sing-box".into(),
@@ -252,14 +260,15 @@ pub fn engine_info(explicit: Option<&str>, resource_dir: Option<&Path>) -> Engin
     }
 }
 
-
 pub fn info(explicit: Option<&str>, resource_dir: Option<&Path>) -> CoreInfo {
     let Some(path) = find_core(explicit, resource_dir) else {
         return CoreInfo {
             path: None,
             version: None,
             ok: false,
-            error: Some("sing-box binary not found (set corePath in settings or $VEIL_SING_BOX)".into()),
+            error: Some(
+                "sing-box binary not found (set corePath in settings or $VEIL_SING_BOX)".into(),
+            ),
         };
     };
     match version(&path) {
@@ -410,7 +419,10 @@ mod tests {
             return;
         };
         let capabilities = capabilities_for(Some(Path::new(&path)));
-        assert!(capabilities.clash_api, "vendored sing-box has with_clash_api");
+        assert!(
+            capabilities.clash_api,
+            "vendored sing-box has with_clash_api"
+        );
         assert!(capabilities.tun, "/dev/net/tun exists on this host");
         assert_eq!(
             capabilities.auto_redirect,
@@ -434,12 +446,47 @@ mod tests {
             ],
             "route": {"final": "Proxy"}
         }"#;
-        let tags = validate_content(core, subscription_style, "system", 2080, 9090, false, "info")
-            .expect("subscription-style sing-box config must pass real check");
+        let tags = validate_content(
+            core,
+            subscription_style,
+            "system",
+            2080,
+            9090,
+            false,
+            "info",
+        )
+        .expect("subscription-style sing-box config must pass real check");
         assert!(tags.contains(&"Proxy".to_string()));
-        assert!(validate_content(core, "{ this is not json", "system", 2080, 9090, false, "info").is_err());
-        assert!(validate_content(core, r#"{"log":{"level":"info"}}"#, "system", 2080, 9090, false, "info").is_err());
-        assert!(validate_content(core, r#"{"outbounds":[]}"#, "system", 2080, 9090, false, "info").is_err());
+        assert!(validate_content(
+            core,
+            "{ this is not json",
+            "system",
+            2080,
+            9090,
+            false,
+            "info"
+        )
+        .is_err());
+        assert!(validate_content(
+            core,
+            r#"{"log":{"level":"info"}}"#,
+            "system",
+            2080,
+            9090,
+            false,
+            "info"
+        )
+        .is_err());
+        assert!(validate_content(
+            core,
+            r#"{"outbounds":[]}"#,
+            "system",
+            2080,
+            9090,
+            false,
+            "info"
+        )
+        .is_err());
     }
 
     #[test]

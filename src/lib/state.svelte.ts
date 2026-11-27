@@ -137,10 +137,7 @@ class AppStore {
   get tunReady(): boolean {
     const capabilities = this.capabilities;
     return (
-      capabilities !== null &&
-      capabilities.tun &&
-      capabilities.autoRoute &&
-      capabilities.dnsHijack
+      capabilities !== null && capabilities.tun && capabilities.autoRoute && capabilities.dnsHijack
     );
   }
 
@@ -254,19 +251,22 @@ class AppStore {
             down: stats.downSpeed,
             connections: stats.connections,
           });
-          if (this.history.length > HISTORY_LIMIT) this.history.splice(0, this.history.length - HISTORY_LIMIT);
+          if (this.history.length > HISTORY_LIMIT)
+            this.history.splice(0, this.history.length - HISTORY_LIMIT);
         }),
         await events.onLog((entry) => {
           if (this.logPaused) {
             this.#pendingLogs.push(entry);
-            if (this.#pendingLogs.length > LOG_LIMIT) this.#pendingLogs.splice(0, this.#pendingLogs.length - LOG_LIMIT);
+            if (this.#pendingLogs.length > LOG_LIMIT)
+              this.#pendingLogs.splice(0, this.#pendingLogs.length - LOG_LIMIT);
             this.logBuffered = this.#pendingLogs.length;
           } else {
             this.mergeLogs([entry]);
           }
         }),
         await events.onNotice((notice) => {
-          const kind = notice.level === "error" ? "error" : notice.level === "warn" ? "info" : "info";
+          const kind =
+            notice.level === "error" ? "error" : notice.level === "warn" ? "info" : "info";
           this.notify(kind, notice.level === "warn" ? "Engine warning" : "Engine", notice.message);
         }),
         await events.onProfilesChanged((profiles) => {
@@ -407,10 +407,12 @@ class AppStore {
     if (!incoming.length) return;
     if (this.logPaused) {
       this.#pendingLogs.push(...incoming);
-      if (this.#pendingLogs.length > LOG_LIMIT) this.#pendingLogs.splice(0, this.#pendingLogs.length - LOG_LIMIT);
+      if (this.#pendingLogs.length > LOG_LIMIT)
+        this.#pendingLogs.splice(0, this.#pendingLogs.length - LOG_LIMIT);
       this.logBuffered = this.#pendingLogs.length;
       return;
     }
+    // eslint-disable-next-line svelte/prefer-svelte-reactivity -- local lookup map used only within this merge, never reactive state
     const bySeq = new Map<number, LogEntry>();
     for (const entry of this.logs) bySeq.set(entry.seq, entry);
     for (const entry of incoming) bySeq.set(entry.seq, entry);

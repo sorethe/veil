@@ -52,8 +52,12 @@ fn env_first(keys: &[&str]) -> Option<String> {
 }
 
 pub fn desktop_raw() -> String {
-    env_first(&["XDG_CURRENT_DESKTOP", "XDG_SESSION_DESKTOP", "DESKTOP_SESSION"])
-        .unwrap_or_else(|| "unknown".into())
+    env_first(&[
+        "XDG_CURRENT_DESKTOP",
+        "XDG_SESSION_DESKTOP",
+        "DESKTOP_SESSION",
+    ])
+    .unwrap_or_else(|| "unknown".into())
 }
 
 pub fn session_type() -> String {
@@ -84,11 +88,17 @@ fn command_exists(name: &str) -> bool {
     })
 }
 
-
 pub fn proxy_kind_from_desktop(desktop: &str) -> String {
     let lower = desktop.to_ascii_lowercase();
     if [
-        "gnome", "ubuntu", "unity", "pop", "cinnamon", "budgie", "pantheon", "elementary",
+        "gnome",
+        "ubuntu",
+        "unity",
+        "pop",
+        "cinnamon",
+        "budgie",
+        "pantheon",
+        "elementary",
         "cosmic",
     ]
     .iter()
@@ -145,7 +155,10 @@ pub fn platform_info() -> PlatformInfo {
 
 pub fn tray_available() -> (bool, String) {
     if !command_exists("gdbus") {
-        return (false, "gdbus is not installed; cannot query StatusNotifierWatcher".into());
+        return (
+            false,
+            "gdbus is not installed; cannot query StatusNotifierWatcher".into(),
+        );
     }
     let output = Command::new("gdbus")
         .args([
@@ -164,9 +177,15 @@ pub fn tray_available() -> (bool, String) {
         Ok(out) if out.status.success() => {
             let text = String::from_utf8_lossy(&out.stdout);
             if text.contains("true") {
-                (true, "StatusNotifierWatcher is registered on the session bus".into())
+                (
+                    true,
+                    "StatusNotifierWatcher is registered on the session bus".into(),
+                )
             } else {
-                (false, "no StatusNotifierWatcher host on the session bus".into())
+                (
+                    false,
+                    "no StatusNotifierWatcher host on the session bus".into(),
+                )
             }
         }
         Ok(out) => (
@@ -494,7 +513,11 @@ fn xfconf_set(property: &str, value: &str, is_int: bool) -> Result<(), String> {
     if is_int {
         args.extend(["-t", "int"]);
     }
-    run("xfconf-query", &args.iter().map(|s| s.to_string()).collect::<Vec<_>>()).map(|_| ())
+    run(
+        "xfconf-query",
+        &args.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+    )
+    .map(|_| ())
 }
 
 fn apply_xfce(port: u16) -> Result<ProxyInfo, String> {
@@ -601,7 +624,14 @@ pub fn tun_info() -> ProxyInfo {
 /// Proxy-related environment variables we saw, for honest diagnostics text.
 pub fn proxy_env() -> Vec<String> {
     let mut values = Vec::new();
-    for key in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"] {
+    for key in [
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+    ] {
         if let Ok(v) = env::var(key) {
             if !v.trim().is_empty() {
                 values.push(format!("{key}={v}"));
@@ -720,7 +750,11 @@ mod tests {
             Some("18081")
         );
         restore().expect("restore GNOME proxy");
-        assert_eq!(gnome_snapshot().unwrap(), before, "exact previous values restored");
+        assert_eq!(
+            gnome_snapshot().unwrap(),
+            before,
+            "exact previous values restored"
+        );
         assert!(!paths::sysproxy_state_path().exists());
     }
 

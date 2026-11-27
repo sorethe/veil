@@ -72,7 +72,9 @@
     </p>
     <pre class="code boot__error">{app.bootError}</pre>
     <div class="boot__actions">
-      <button type="button" class="btn btn--primary" onclick={() => void app.retryBoot()}>Retry bootstrap</button>
+      <button type="button" class="btn btn--primary" onclick={() => void app.retryBoot()}>
+        Retry bootstrap
+      </button>
     </div>
     <p class="boot__mono mono">The backend must be running inside the Tauri shell.</p>
   </div>
@@ -101,7 +103,9 @@
       </div>
     </main>
   </div>
-  <p class="visually-hidden-live" aria-live="polite">Connection state: {statusWord(app.engine.status)}</p>
+  <p class="visually-hidden-live" aria-live="polite">
+    Connection state: {statusWord(app.engine.status)}
+  </p>
   <ToastHost />
 {/if}
 

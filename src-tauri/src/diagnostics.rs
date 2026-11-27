@@ -109,9 +109,28 @@ pub fn find_helper(resource_dir: Option<&Path>) -> Option<PathBuf> {
             candidates.push(dir.join("veil-helper"));
             for ancestor in dir.ancestors().take(8) {
                 candidates.push(ancestor.join("veil-helper"));
-                candidates.push(ancestor.join("helper").join("target").join("release").join("veil-helper"));
-                candidates.push(ancestor.join("helper").join("target").join("debug").join("veil-helper"));
-                candidates.push(ancestor.join("src-tauri").join("helper").join("target").join("release").join("veil-helper"));
+                candidates.push(
+                    ancestor
+                        .join("helper")
+                        .join("target")
+                        .join("release")
+                        .join("veil-helper"),
+                );
+                candidates.push(
+                    ancestor
+                        .join("helper")
+                        .join("target")
+                        .join("debug")
+                        .join("veil-helper"),
+                );
+                candidates.push(
+                    ancestor
+                        .join("src-tauri")
+                        .join("helper")
+                        .join("target")
+                        .join("release")
+                        .join("veil-helper"),
+                );
             }
         }
     }
@@ -357,7 +376,9 @@ pub fn run(
         errors.push("/dev/net/tun is missing; TUN mode is unavailable.".into());
     }
     if !nft {
-        errors.push("nft is not installed; auto_redirect and TUN routing diagnostics are limited.".into());
+        errors.push(
+            "nft is not installed; auto_redirect and TUN routing diagnostics are limited.".into(),
+        );
     }
     errors.truncate(12);
 
@@ -432,18 +453,16 @@ mod tests {
         );
         assert_eq!(diag.permissions.helper, expected);
         if !policy {
-            assert!(!diag.permissions.helper, "dev helper must not imply permission");
+            assert!(
+                !diag.permissions.helper,
+                "dev helper must not imply permission"
+            );
         }
     }
 
     #[test]
     fn diagnostics_serializes_contract_fields() {
-        let diag = run(
-            CoreInfo::default(),
-            None,
-            &LogStore::new(),
-            None,
-        );
+        let diag = run(CoreInfo::default(), None, &LogStore::new(), None);
         let json = serde_json::to_value(&diag).unwrap();
         for key in [
             "core",

@@ -62,8 +62,7 @@ fn random_secret() -> String {
 /// Build a runtime config from a stored raw profile, mutating only the
 /// known integration points and preserving every unknown field.
 pub fn generate(raw: &str, opts: &GenOptions) -> Result<Generated, String> {
-    let mut value: Value =
-        serde_json::from_str(raw).map_err(|e| format!("invalid JSON: {e}"))?;
+    let mut value: Value = serde_json::from_str(raw).map_err(|e| format!("invalid JSON: {e}"))?;
     if !value.is_object() {
         return Err("profile must be a JSON object".into());
     }
@@ -243,7 +242,10 @@ mod tests {
             json!("127.0.0.1:9090")
         );
         assert_eq!(
-            v["experimental"]["clash_api"]["secret"].as_str().unwrap().len(),
+            v["experimental"]["clash_api"]["secret"]
+                .as_str()
+                .unwrap()
+                .len(),
             32
         );
         assert_eq!(v["log"]["level"], json!("info"));

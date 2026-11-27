@@ -14,15 +14,26 @@
   let query = $state("");
   let source = $state("all");
   let autoScroll = $state(true);
-  let levels = $state<Record<string, boolean>>({ debug: true, info: true, warn: true, error: true });
+  let levels = $state<Record<string, boolean>>({
+    debug: true,
+    info: true,
+    warn: true,
+    error: true,
+  });
   let viewport = $state<HTMLDivElement | null>(null);
   let exporting = $state(false);
   let confirmClear = $state(false);
   let prefsLoaded = false;
 
-  const selectedLevels = $derived(Object.entries(levels).filter(([, enabled]) => enabled).map(([level]) => level));
+  const selectedLevels = $derived(
+    Object.entries(levels)
+      .filter(([, enabled]) => enabled)
+      .map(([level]) => level),
+  );
   const counts = $derived(countLevels(app.logs));
-  const filtered = $derived(app.logs.filter((entry) => matches(entry, query, source, levels, selectedLevels.length)));
+  const filtered = $derived(
+    app.logs.filter((entry) => matches(entry, query, source, levels, selectedLevels.length)),
+  );
   const displayed = $derived(filtered.slice(-RENDER_LIMIT));
   const live = $derived(app.engine.status === "connected");
 
@@ -57,13 +68,20 @@
       if (raw) {
         const parsed: unknown = JSON.parse(raw);
         if (parsed && typeof parsed === "object") {
-          if ("autoScroll" in parsed && typeof parsed.autoScroll === "boolean") autoScroll = parsed.autoScroll;
-          if ("source" in parsed && typeof parsed.source === "string" && ["all", "engine", "clash"].includes(parsed.source)) {
+          if ("autoScroll" in parsed && typeof parsed.autoScroll === "boolean")
+            autoScroll = parsed.autoScroll;
+          if (
+            "source" in parsed &&
+            typeof parsed.source === "string" &&
+            ["all", "engine", "clash"].includes(parsed.source)
+          ) {
             source = parsed.source;
           }
           if ("query" in parsed && typeof parsed.query === "string") query = parsed.query;
           if ("levels" in parsed && Array.isArray(parsed.levels)) {
-            const stored = parsed.levels.filter((level): level is string => typeof level === "string");
+            const stored = parsed.levels.filter(
+              (level): level is string => typeof level === "string",
+            );
             if (stored.length) {
               levels = { debug: false, info: false, warn: false, error: false };
               for (const level of stored) {
@@ -140,7 +158,8 @@
 
   function levelClass(level: string): string {
     const normalized = level.toLowerCase();
-    if (normalized === "error" || normalized === "fatal" || normalized === "panic") return "log__level--error";
+    if (normalized === "error" || normalized === "fatal" || normalized === "panic")
+      return "log__level--error";
     if (normalized === "warn") return "log__level--warn";
     if (normalized === "debug" || normalized === "trace") return "log__level--debug";
     return "log__level--info";
@@ -152,16 +171,30 @@
     <span class="kicker">Logs</span>
     <h1 class="page-title">Engine journal</h1>
     <p class="page-desc">
-      Engine and Clash messages, newest last. The backend redacts credentials before entries reach this view.
+      Engine and Clash messages, newest last. The backend redacts credentials before entries reach
+      this view.
     </p>
   </div>
   <div class="head-actions">
-    <span class="tag {live ? 'tag--accent' : ''}">{live ? "live feed" : "engine " + app.engine.status}</span>
+    <span class="tag {live ? 'tag--accent' : ''}">
+      {live ? "live feed" : "engine " + app.engine.status}
+    </span>
     {#if app.logPaused}<span class="tag tag--warning">paused</span>{/if}
-    <button type="button" class="btn" disabled={exporting || !app.logs.length} onclick={() => void exportLogs()}>
-      <Icon name="export" size={12} /> {exporting ? "Exporting" : "Export"}
+    <button
+      type="button"
+      class="btn"
+      disabled={exporting || !app.logs.length}
+      onclick={() => void exportLogs()}
+    >
+      <Icon name="export" size={12} />
+      {exporting ? "Exporting" : "Export"}
     </button>
-    <button type="button" class="btn" disabled={!app.logs.length} onclick={() => (confirmClear = true)}>
+    <button
+      type="button"
+      class="btn"
+      disabled={!app.logs.length}
+      onclick={() => (confirmClear = true)}
+    >
       <Icon name="trash" size={12} /> Clear
     </button>
   </div>
@@ -172,7 +205,9 @@
     <Icon name="info" size={15} />
     <div class="grow">
       <p class="banner__title">Engine is {app.engine.status}</p>
-      <p class="banner__body">Showing buffered entries. New entries appear when the engine emits them.</p>
+      <p class="banner__body">
+        Showing buffered entries. New entries appear when the engine emits them.
+      </p>
     </div>
   </div>
 {/if}
@@ -210,7 +245,11 @@
   </select>
 
   <div class="toggle">
-    <Toggle checked={autoScroll} label="Auto-scroll logs" onchange={(next) => (autoScroll = next)} />
+    <Toggle
+      checked={autoScroll}
+      label="Auto-scroll logs"
+      onchange={(next) => (autoScroll = next)}
+    />
     <span class="small muted">Auto-scroll</span>
   </div>
 
@@ -223,7 +262,13 @@
     >
       {app.logPaused ? "Resume" : "Pause"}
     </button>
-    <button type="button" class="icon-btn" aria-label="Reload logs" title="Reload" onclick={() => void app.loadLogs()}>
+    <button
+      type="button"
+      class="icon-btn"
+      aria-label="Reload logs"
+      title="Reload"
+      onclick={() => void app.loadLogs()}
+    >
       <Icon name="refresh" size={14} />
     </button>
   </div>
@@ -231,7 +276,8 @@
 
 {#if app.logPaused && app.logBuffered > 0}
   <p class="buffered mono">
-    {app.logBuffered} {app.logBuffered === 1 ? "entry" : "entries"} buffered while paused · resume to merge
+    {app.logBuffered}
+    {app.logBuffered === 1 ? "entry" : "entries"} buffered while paused · resume to merge
   </p>
 {/if}
 
@@ -245,7 +291,9 @@
   {#if !app.logs.length}
     <EmptyState
       title="No log entries"
-      description={live ? "The engine is live but has not emitted any entries yet." : "Logs appear once the engine runs. Start a session or reload."}
+      description={live
+        ? "The engine is live but has not emitted any entries yet."
+        : "Logs appear once the engine runs. Start a session or reload."}
       icon="logs"
     >
       <button type="button" class="btn btn--sm" onclick={() => void app.loadLogs()}>Reload</button>
@@ -262,8 +310,8 @@
     <div class="log-scroll" bind:this={viewport}>
       {#if filtered.length > RENDER_LIMIT}
         <p class="truncated mono">
-          {filtered.length - RENDER_LIMIT} earlier matching entries are outside the render window; export for the
-          full buffer.
+          {filtered.length - RENDER_LIMIT} earlier matching entries are outside the render window; export
+          for the full buffer.
         </p>
       {/if}
       {#each displayed as entry (entry.seq)}
@@ -277,7 +325,9 @@
     </div>
     <div class="log-foot mono">
       <span>{displayed.length} of {filtered.length} matching · {app.logs.length} buffered</span>
-      {#if app.logPaused}<span class="warning">paused</span>{:else}<span class="faint">following</span>{/if}
+      {#if app.logPaused}<span class="warning">paused</span>{:else}<span class="faint">
+          following
+        </span>{/if}
     </div>
   {/if}
 </section>
@@ -290,12 +340,14 @@
     width="440px"
   >
     <p class="small">
-      This clears the in-memory buffer shown here. The backend may keep its own log file; export first if you
-      need the current entries.
+      This clears the in-memory buffer shown here. The backend may keep its own log file; export
+      first if you need the current entries.
     </p>
     {#snippet footer()}
       <button type="button" class="btn" onclick={() => (confirmClear = false)}>Cancel</button>
-      <button type="button" class="btn btn--danger" onclick={() => void clearLogs()}>Clear buffer</button>
+      <button type="button" class="btn btn--danger" onclick={() => void clearLogs()}>
+        Clear buffer
+      </button>
     {/snippet}
   </Modal>
 {/if}

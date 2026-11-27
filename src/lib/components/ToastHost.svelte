@@ -13,13 +13,21 @@
   {#each app.toasts as toast (toast.id)}
     <div class="toast {tone[toast.kind] ?? tone.info}" role="status">
       <span class="toast__mark" aria-hidden="true">
-        <Icon name={toast.kind === "error" ? "error" : toast.kind === "success" ? "check" : "info"} size={14} />
+        <Icon
+          name={toast.kind === "error" ? "error" : toast.kind === "success" ? "check" : "info"}
+          size={14}
+        />
       </span>
       <div class="toast__text">
         <p class="toast__title">{toast.title}</p>
         {#if toast.detail}<p class="toast__detail">{toast.detail}</p>{/if}
       </div>
-      <button type="button" class="icon-btn toast__close" aria-label="Dismiss" onclick={() => app.dismiss(toast.id)}>
+      <button
+        type="button"
+        class="icon-btn toast__close"
+        aria-label="Dismiss"
+        onclick={() => app.dismiss(toast.id)}
+      >
         <Icon name="close" size={12} />
       </button>
     </div>

@@ -41,8 +41,8 @@
     <span class="kicker">Outbounds</span>
     <h1 class="page-title">Egress</h1>
     <p class="page-desc">
-      Groups and nodes are read from the running engine. Switching a selector applies immediately and is
-      persisted by the backend for this profile.
+      Groups and nodes are read from the running engine. Switching a selector applies immediately
+      and is persisted by the backend for this profile.
     </p>
   </div>
   <div class="head-actions">
@@ -50,10 +50,13 @@
       type="button"
       class="btn"
       disabled={outboundStore.loading || app.engine.status !== "connected"}
-      title={app.engine.status !== "connected" ? "Connect first: outbounds are read from a live engine." : undefined}
+      title={app.engine.status !== "connected"
+        ? "Connect first: outbounds are read from a live engine."
+        : undefined}
       onclick={() => void outboundStore.load()}
     >
-      <Icon name="refresh" size={12} /> {outboundStore.loading ? "Reading" : "Refresh"}
+      <Icon name="refresh" size={12} />
+      {outboundStore.loading ? "Reading" : "Refresh"}
     </button>
   </div>
 </div>

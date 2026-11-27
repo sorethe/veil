@@ -66,12 +66,16 @@
         class="textarea editor__json"
         spellcheck="false"
         bind:value={content}
-        oninput={() => (validation = null)}
-      ></textarea>
+        oninput={() => (validation = null)}></textarea>
     </Field>
 
     <div class="row row--wrap">
-      <button type="button" class="btn btn--sm" disabled={validating || !content.trim()} onclick={() => void validate()}>
+      <button
+        type="button"
+        class="btn btn--sm"
+        disabled={validating || !content.trim()}
+        onclick={() => void validate()}
+      >
         {validating ? "Validating" : "Validate"}
       </button>
       {#if validation?.ok}
@@ -97,7 +101,12 @@
 
   {#snippet footer()}
     <button type="button" class="btn" onclick={onclose}>Cancel</button>
-    <button type="button" class="btn btn--primary" disabled={saving || !content.trim()} onclick={() => void save()}>
+    <button
+      type="button"
+      class="btn btn--primary"
+      disabled={saving || !content.trim()}
+      onclick={() => void save()}
+    >
       {saving ? "Saving" : "Save profile"}
     </button>
   {/snippet}

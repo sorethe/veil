@@ -3,8 +3,8 @@ pub mod configgen;
 pub mod core;
 pub mod db;
 pub mod diagnostics;
-pub mod errors;
 pub mod engine;
+pub mod errors;
 pub mod links;
 pub mod logs;
 pub mod paths;
@@ -45,10 +45,11 @@ fn validate_profile_content(
     resource_dir: Option<&Path>,
     content: &str,
 ) -> Result<Vec<String>, String> {
-    let core_path = core::find_core(settings.core_path.as_deref(), resource_dir).ok_or_else(|| {
-        "sing-box binary not found; cannot validate the profile. Set corePath in settings."
-            .to_string()
-    })?;
+    let core_path =
+        core::find_core(settings.core_path.as_deref(), resource_dir).ok_or_else(|| {
+            "sing-box binary not found; cannot validate the profile. Set corePath in settings."
+                .to_string()
+        })?;
     core::validate_content(
         &core_path,
         content,
@@ -149,8 +150,8 @@ fn decode_base64_any(input: &str) -> Option<Vec<u8>> {
 }
 
 fn validate_json_subscription(text: &str) -> Result<String, String> {
-    let value: Value =
-        serde_json::from_str(text).map_err(|e| format!("subscription returned invalid JSON: {e}"))?;
+    let value: Value = serde_json::from_str(text)
+        .map_err(|e| format!("subscription returned invalid JSON: {e}"))?;
     if !value.is_object() {
         return Err("subscription JSON must be an object".into());
     }
@@ -242,8 +243,12 @@ fn import_links_profile(
     source: &str,
 ) -> Result<Profile, CommandError> {
     let content = links::links_to_config_json(text).map_err(CommandError::from)?;
-    validate_profile_content(&state.settings.get(), state.resource_dir.as_deref(), &content)
-        .map_err(CommandError::validation)?;
+    validate_profile_content(
+        &state.settings.get(),
+        state.resource_dir.as_deref(),
+        &content,
+    )
+    .map_err(CommandError::validation)?;
     let profile = state
         .db
         .create_profile(name, "links", &content, source, None, false)
@@ -255,13 +260,11 @@ fn import_links_profile(
 #[tauri::command]
 async fn bootstrap(state: State<'_, AppState>) -> Result<Value, CommandError> {
     let settings = state.settings.get();
-    let profiles = state
-        .db
-        .list_profiles()
-        .map_err(CommandError::io)?;
+    let profiles = state.db.list_profiles().map_err(CommandError::io)?;
     let engine = state.engine.snapshot();
     let core_info = core::info(settings.core_path.as_deref(), state.resource_dir.as_deref());
-    let engine_info = core::engine_info(settings.core_path.as_deref(), state.resource_dir.as_deref());
+    let engine_info =
+        core::engine_info(settings.core_path.as_deref(), state.resource_dir.as_deref());
     let platform = sysproxy::platform_info();
     Ok(json!({
         "settings": settings,
@@ -285,12 +288,20 @@ async fn connect(
     mode: Option<String>,
     profile_id: Option<i64>,
 ) -> Result<EngineState, CommandError> {
-    state.engine.connect(mode, profile_id).await.map_err(CommandError::from_engine)
+    state
+        .engine
+        .connect(mode, profile_id)
+        .await
+        .map_err(CommandError::from_engine)
 }
 
 #[tauri::command]
 async fn disconnect(state: State<'_, AppState>) -> Result<EngineState, CommandError> {
-    state.engine.disconnect().await.map_err(CommandError::from_engine)
+    state
+        .engine
+        .disconnect()
+        .await
+        .map_err(CommandError::from_engine)
 }
 
 #[tauri::command]
@@ -300,12 +311,20 @@ async fn get_stats(state: State<'_, AppState>) -> Result<Stats, CommandError> {
 
 #[tauri::command]
 async fn get_connections(state: State<'_, AppState>) -> Result<Vec<Conn>, CommandError> {
-    state.engine.connections().await.map_err(CommandError::from_engine)
+    state
+        .engine
+        .connections()
+        .await
+        .map_err(CommandError::from_engine)
 }
 
 #[tauri::command]
 async fn close_connection(state: State<'_, AppState>, id: String) -> Result<(), CommandError> {
-    state.engine.close_connection(&id).await.map_err(CommandError::from_engine)
+    state
+        .engine
+        .close_connection(&id)
+        .await
+        .map_err(CommandError::from_engine)
 }
 
 #[tauri::command]
@@ -329,12 +348,20 @@ async fn export_logs(state: State<'_, AppState>) -> Result<String, CommandError>
 
 #[tauri::command]
 async fn get_route(state: State<'_, AppState>) -> Result<RouteInfo, CommandError> {
-    state.engine.route().await.map_err(CommandError::from_engine)
+    state
+        .engine
+        .route()
+        .await
+        .map_err(CommandError::from_engine)
 }
 
 #[tauri::command]
 async fn get_outbounds(state: State<'_, AppState>) -> Result<Vec<Outbound>, CommandError> {
-    state.engine.outbounds().await.map_err(CommandError::from_engine)
+    state
+        .engine
+        .outbounds()
+        .await
+        .map_err(CommandError::from_engine)
 }
 
 #[tauri::command]
@@ -343,12 +370,20 @@ async fn select_outbound(
     group: String,
     tag: String,
 ) -> Result<(), CommandError> {
-    state.engine.select_outbound(&group, &tag).await.map_err(CommandError::from_engine)
+    state
+        .engine
+        .select_outbound(&group, &tag)
+        .await
+        .map_err(CommandError::from_engine)
 }
 
 #[tauri::command]
 async fn test_delay(state: State<'_, AppState>, tag: String) -> Result<u64, CommandError> {
-    state.engine.test_delay(&tag).await.map_err(CommandError::from_engine)
+    state
+        .engine
+        .test_delay(&tag)
+        .await
+        .map_err(CommandError::from_engine)
 }
 
 #[tauri::command]
@@ -377,8 +412,12 @@ async fn create_profile(
     name: String,
     content: String,
 ) -> Result<Profile, CommandError> {
-    validate_profile_content(&state.settings.get(), state.resource_dir.as_deref(), &content)
-        .map_err(CommandError::validation)?;
+    validate_profile_content(
+        &state.settings.get(),
+        state.resource_dir.as_deref(),
+        &content,
+    )
+    .map_err(CommandError::validation)?;
     let profile = state
         .db
         .create_profile(&name, "local", &content, "manual", None, false)
@@ -396,8 +435,12 @@ async fn update_profile(
     content: Option<String>,
 ) -> Result<Profile, CommandError> {
     if let Some(content) = &content {
-        validate_profile_content(&state.settings.get(), state.resource_dir.as_deref(), content)
-            .map_err(CommandError::validation)?;
+        validate_profile_content(
+            &state.settings.get(),
+            state.resource_dir.as_deref(),
+            content,
+        )
+        .map_err(CommandError::validation)?;
     }
     let profile = state
         .db
@@ -456,8 +499,12 @@ async fn import_json(
     content: String,
     source: Option<String>,
 ) -> Result<Profile, CommandError> {
-    validate_profile_content(&state.settings.get(), state.resource_dir.as_deref(), &content)
-        .map_err(CommandError::validation)?;
+    validate_profile_content(
+        &state.settings.get(),
+        state.resource_dir.as_deref(),
+        &content,
+    )
+    .map_err(CommandError::validation)?;
     let source = source.unwrap_or_else(|| "inline".into());
     let profile = state
         .db
@@ -478,8 +525,12 @@ async fn import_subscription(
     let content = fetch_subscription(&url)
         .await
         .map_err(CommandError::network)?;
-    validate_profile_content(&state.settings.get(), state.resource_dir.as_deref(), &content)
-        .map_err(CommandError::validation)?;
+    validate_profile_content(
+        &state.settings.get(),
+        state.resource_dir.as_deref(),
+        &content,
+    )
+    .map_err(CommandError::validation)?;
     let name = name
         .filter(|n| !n.trim().is_empty())
         .unwrap_or_else(|| derive_subscription_name(&url));
@@ -511,7 +562,11 @@ async fn refresh_subscription(
     state.engine.logs.add_secret(&url);
     let result = async {
         let content = fetch_subscription(&url).await?;
-        validate_profile_content(&state.settings.get(), state.resource_dir.as_deref(), &content)?;
+        validate_profile_content(
+            &state.settings.get(),
+            state.resource_dir.as_deref(),
+            &content,
+        )?;
         Ok::<String, String>(content)
     }
     .await;
@@ -589,7 +644,9 @@ async fn import_qr(
     }
     let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
     if text.is_empty() {
-        return Err(CommandError::validation("no QR content detected in the image"));
+        return Err(CommandError::validation(
+            "no QR content detected in the image",
+        ));
     }
     let name = name
         .filter(|n| !n.trim().is_empty())
@@ -598,7 +655,10 @@ async fn import_qr(
 }
 
 #[tauri::command]
-async fn validate_content(state: State<'_, AppState>, content: String) -> Result<Value, CommandError> {
+async fn validate_content(
+    state: State<'_, AppState>,
+    content: String,
+) -> Result<Value, CommandError> {
     match validate_profile_content(
         &state.settings.get(),
         state.resource_dir.as_deref(),
@@ -655,7 +715,10 @@ async fn update_settings(
     patch: Value,
 ) -> Result<Settings, CommandError> {
     let before = state.settings.get();
-    let after = state.settings.update(&patch).map_err(CommandError::validation)?;
+    let after = state
+        .settings
+        .update(&patch)
+        .map_err(CommandError::validation)?;
     if before.autostart != after.autostart {
         write_autostart(after.autostart).map_err(CommandError::io)?;
     }
@@ -663,7 +726,9 @@ async fn update_settings(
 }
 
 #[tauri::command]
-async fn run_diagnostics(state: State<'_, AppState>) -> Result<diagnostics::Diagnostics, CommandError> {
+async fn run_diagnostics(
+    state: State<'_, AppState>,
+) -> Result<diagnostics::Diagnostics, CommandError> {
     let settings = state.settings.get();
     let core_info = core::info(settings.core_path.as_deref(), state.resource_dir.as_deref());
     let active = state.engine.active_profile_content();
@@ -701,7 +766,9 @@ async fn read_clipboard() -> Result<String, CommandError> {
             return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
         }
     }
-    Err(CommandError::unsupported("could not read the clipboard (tried wl-paste and xclip)"))
+    Err(CommandError::unsupported(
+        "could not read the clipboard (tried wl-paste and xclip)",
+    ))
 }
 
 #[tauri::command]
@@ -723,14 +790,18 @@ async fn open_config_dir() -> Result<(), CommandError> {
     {
         return Ok(());
     }
-    Err(CommandError::unsupported("no file manager opener found (tried xdg-open and gio)"))
+    Err(CommandError::unsupported(
+        "no file manager opener found (tried xdg-open and gio)",
+    ))
 }
 
 #[tauri::command]
 async fn set_autostart(state: State<'_, AppState>, enabled: bool) -> Result<bool, CommandError> {
     let result = write_autostart(enabled).map_err(CommandError::io)?;
     if let Err(e) = state.settings.update(&json!({ "autostart": enabled })) {
-        return Err(CommandError::io(format!("autostart file written but settings update failed: {e}")));
+        return Err(CommandError::io(format!(
+            "autostart file written but settings update failed: {e}"
+        )));
     }
     Ok(result)
 }
@@ -766,16 +837,9 @@ fn spawn_subscription_updater(
                                 logs.push(
                                     "warn",
                                     "engine",
-                                    format!(
-                                        "refresh of '{}' failed: {error}",
-                                        profile.name
-                                    ),
+                                    format!("refresh of '{}' failed: {error}", profile.name),
                                 );
-                                let _ = db.set_subscription_result(
-                                    profile.id,
-                                    None,
-                                    Some(&error),
-                                );
+                                let _ = db.set_subscription_result(profile.id, None, Some(&error));
                                 changed = true;
                                 continue;
                             }
@@ -798,16 +862,9 @@ fn spawn_subscription_updater(
                                 logs.push(
                                     "warn",
                                     "engine",
-                                    format!(
-                                        "subscription '{}' is invalid: {error}",
-                                        profile.name
-                                    ),
+                                    format!("subscription '{}' is invalid: {error}", profile.name),
                                 );
-                                let _ = db.set_subscription_result(
-                                    profile.id,
-                                    None,
-                                    Some(&error),
-                                );
+                                let _ = db.set_subscription_result(profile.id, None, Some(&error));
                             }
                         }
                         changed = true;
@@ -977,7 +1034,10 @@ mod tests {
         let error = normalize_subscription_body(r#"{"log":{"level":"info"}}"#).unwrap_err();
         assert!(error.contains("no outbounds"), "{error}");
         let error = normalize_subscription_body("{not json").unwrap_err();
-        assert!(error.contains("unrecognized") || error.contains("invalid"), "{error}");
+        assert!(
+            error.contains("unrecognized") || error.contains("invalid"),
+            "{error}"
+        );
     }
 
     #[test]
