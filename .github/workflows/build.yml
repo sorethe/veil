@@ -1,0 +1,100 @@
+name: Build
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  linux-x86_64:
+    name: Release binaries (Linux x86_64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            pkg-config \
+            libssl-dev \
+            libdbus-1-dev \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12.22.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri -> target
+            src-tauri/helper -> target
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend
+        run: pnpm build
+
+      - name: Build release app
+        working-directory: src-tauri
+        run: cargo build --locked --release
+
+      - name: Build release helper
+        run: cargo build --locked --release --manifest-path src-tauri/helper/Cargo.toml
+
+      - name: Inspect binaries
+        run: |
+          test -x src-tauri/target/release/veil
+          test -x src-tauri/helper/target/release/veil-helper
+          file src-tauri/target/release/veil src-tauri/helper/target/release/veil-helper
+          ls -lh src-tauri/target/release/veil src-tauri/helper/target/release/veil-helper
+          sha256sum src-tauri/target/release/veil src-tauri/helper/target/release/veil-helper
+
+      - name: Upload app binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: veil-linux-x86_64
+          path: src-tauri/target/release/veil
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload helper binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: veil-helper-linux-x86_64
+          path: src-tauri/helper/target/release/veil-helper
+          if-no-files-found: error
+          retention-days: 14
