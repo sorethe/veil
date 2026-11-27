@@ -6,8 +6,9 @@
   import Mark from "./Mark.svelte";
   import StatusGlyph from "./StatusGlyph.svelte";
 
-  const nav: { id: View; label: string; icon: IconName }[] = [
+  const nav: { id: View; label: string; icon: IconName; tag?: string }[] = [
     { id: "overview", label: "Overview", icon: "overview" },
+    { id: "membrane", label: "Membrane", icon: "membrane", tag: "lab" },
     { id: "profiles", label: "Profiles", icon: "profiles" },
     { id: "routing", label: "Routing", icon: "routing" },
     { id: "outbounds", label: "Outbounds", icon: "outbounds" },
@@ -90,13 +91,16 @@
             class="nav__item"
             class:nav__item--active={app.view === item.id}
             aria-current={app.view === item.id ? "page" : undefined}
-            aria-label={item.label}
+            aria-label={item.tag ? `${item.label} — experimental prototype` : item.label}
             title={item.label}
             onclick={() => app.setView(item.id)}
           >
             <span class="nav__index" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
             <Icon name={item.icon} size={16} />
             <span class="nav__label">{item.label}</span>
+            {#if item.tag}
+              <span class="nav__tag" aria-hidden="true">{item.tag}</span>
+            {/if}
           </button>
         </li>
       {/each}
@@ -272,6 +276,25 @@
     white-space: nowrap;
     font-size: var(--fs-sm);
     font-weight: 450;
+  }
+
+  .nav__tag {
+    flex: none;
+    margin-left: auto;
+    padding: 1px 4px;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    font-family: var(--font-mono);
+    font-size: 8px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--faint);
+    line-height: 1.35;
+  }
+
+  .nav__item--active .nav__tag {
+    color: var(--muted);
+    border-color: var(--line-strong);
   }
 
   .nav__item--active {
@@ -488,6 +511,7 @@
     .brand__text,
     .nav__index,
     .nav__label,
+    .nav__tag,
     .profile-block,
     .traffic,
     .foot-version,

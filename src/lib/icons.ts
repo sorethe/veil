@@ -1,5 +1,6 @@
 export type IconName =
   | "overview"
+  | "membrane"
   | "profiles"
   | "routing"
   | "outbounds"
@@ -38,6 +39,8 @@ export type IconName =
 
 const paths: Record<IconName, string> = {
   overview: '<path d="M4 13h6v7H4zM14 4h6v7h-6zM4 4h6v5H4zM14 15h6v5h-6z"/>',
+  membrane:
+    '<circle cx="12" cy="12" r="7"/><ellipse cx="12" cy="12" rx="3" ry="7"/><path d="M5.4 9.5h13.2M5.4 14.5h13.2"/><ellipse cx="12" cy="12" rx="9.4" ry="3.6" transform="rotate(-28 12 12)"/>',
   profiles: '<path d="M12 3 21 8l-9 5-9-5 9-5Z"/><path d="m3 13 9 5 9-5"/>',
   routing: '<path d="M4 6h5.5a4 4 0 0 1 4 4 4 4 0 0 0 4 4H20"/><path d="M4 18h3M17 6h3"/>',
   outbounds: '<path d="M4 12h16M15 6l6 6-6 6M4 6h5M4 18h5"/>',

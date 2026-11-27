@@ -11,6 +11,7 @@
   import Connections from "./lib/views/Connections.svelte";
   import Diagnostics from "./lib/views/Diagnostics.svelte";
   import Logs from "./lib/views/Logs.svelte";
+  import Membrane from "./lib/views/Membrane.svelte";
   import Outbounds from "./lib/views/Outbounds.svelte";
   import Overview from "./lib/views/Overview.svelte";
   import Profiles from "./lib/views/Profiles.svelte";
@@ -19,6 +20,7 @@
 
   const titles: Record<View, string> = {
     overview: "Overview",
+    membrane: "Membrane",
     profiles: "Profiles",
     routing: "Routing",
     outbounds: "Outbounds",
@@ -101,6 +103,8 @@
         <div class="main-inner" class:main-inner--overview={app.view === "overview"}>
           {#if app.view === "overview"}
             <Overview {navigate} />
+          {:else if app.view === "membrane"}
+            <Membrane {navigate} />
           {:else if app.view === "profiles"}
             <Profiles {navigate} />
           {:else if app.view === "routing"}

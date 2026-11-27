@@ -26,6 +26,7 @@ import { errorMessage } from "./format";
 
 export const VIEW_IDS = [
   "overview",
+  "membrane",
   "profiles",
   "routing",
   "outbounds",
