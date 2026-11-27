@@ -1,17 +1,62 @@
-node_modules/
-dist/
-src-tauri/target/
-src-tauri/gen/
-src-tauri/helper/target/
-*.log
-.DS_Store
+# Rust / Cargo
+target/
+**/target/
+*.rs.bk
+*.pdb
+*.profraw
 
+# Tauri/generated build state
+src-tauri/gen/
+.tauri/
+
+# Local sing-box core for development.
+# The packaged core comes from the pinned official release (see packaging/PKGBUILD).
+src-tauri/resources/sing-box
+src-tauri/resources/sing-box-*/
 vendor/
 
-# Local bundled core (official PKGBUILD source fetches v1.14.5 instead)
-src-tauri/resources/sing-box
+# Stray Linux bundle output (Tauri normally writes under target/)
+*.AppImage
+*.deb
+*.rpm
+*.pacman
+*.pkg.tar.zst
 
-# makepkg scratch/output
+# Node / Vite
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+npm-debug.log*
+pnpm-debug.log*
+yarn-error.log*
+
+# Environment and local secrets
+.env
+.env.*
+!.env.example
+*.secret
+*.local
+
+# Test and coverage output
+coverage/
+.nyc_output/
+*.lcov
+
+# Logs and local runtime output
+*.log
+
+# Packaging scratch and output (makepkg writes src/ and pkg/)
 packaging/src/
 packaging/pkg/
 packaging/*.tar.gz
+packaging/*.tar.zst
+
+# OS / editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~

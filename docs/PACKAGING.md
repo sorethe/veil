@@ -202,8 +202,8 @@ the installed helper.
   `/dev/net/tun` access and no nftables rules were exercised here.
 - `src-tauri/resources/sing-box` is **not tracked** and is ignored by `.gitignore`; a local copy
   may remain for development. The PKGBUILD and `make-source-tarball.sh` use the official pinned
-  upstream core instead. The local history blob was purged; only `/usr/lib/veil/sing-box` from
-  the package is a supported bundled-core location.
+  upstream core instead. The current repository history does not contain the local core binary;
+  only `/usr/lib/veil/sing-box` from the package is a supported bundled-core location.
 - `vendor/`, `src-tauri/target/`, `src-tauri/helper/target/`, `node_modules/`, `dist/`, and
   `packaging/{src,pkg,*.tar.gz}` are git-ignored. The source tarball is built from the working
   tree with those excluded.
@@ -211,7 +211,8 @@ the installed helper.
   PKGBUILD installs it to `/usr/share/licenses/veil/LICENSE`.
 - `url="https://example.invalid/veil"` is a deliberate placeholder (reserved `.invalid` domain),
   not a verified project URL. The polkit `vendor_url="https://veil.dev"` is likewise UNVERIFIED.
-- `StartupWMClass=veil` has not been confirmed against the window class the running app sets.
+- `StartupWMClass=veil` matches the window class observed for the running app (`hyprctl clients`
+  reports class `veil`).
 - `desktop-file-validate` passes with hints only: the `Categories` value lists more than one main
   category.
 - `src-tauri/resources/veil-helper.policy` duplicates `dev.veil.helper.policy`. It is
@@ -226,10 +227,12 @@ the installed helper.
 
 ## Repository hygiene
 
-- `src-tauri/resources/sing-box` was removed from the git index, added to `.gitignore`, and the
-  historical blob was purged from the local (remote-less) history; the local file is retained
-  only for development builds.
+- `src-tauri/resources/sing-box` is not tracked and is ignored by `.gitignore`; the current
+  history does not contain the binary. The local file is retained only for development builds.
 - `packaging/src/`, `packaging/pkg/`, and `packaging/*.tar.gz` are ignored makepkg scratch/output.
 - The only external core source in packaging is the official sing-box v1.14.5 release archive at
   `https://github.com/SagerNet/sing-box/releases/download/v1.14.5/sing-box-1.14.5-linux-amd64.tar.gz`
   with the pinned SHA-256 above.
+
+For the full release flow (version updates, tagging, GitHub release assets, PKGBUILD and
+checksums), see [RELEASING.md](RELEASING.md).

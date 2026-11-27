@@ -1,201 +1,261 @@
 # Veil
 
-A Linux desktop proxy client for Tauri 2 + Svelte 5, powered by the official
-sing-box 1.14.5 binary. Veil does not implement a proxy engine of its own: every
-connection, statistic and route shown in the UI comes from a real sing-box
-process through its Clash API.
+**A Linux desktop proxy client powered by [sing-box](https://github.com/SagerNet/sing-box).**
 
-- UI: `src/` (Svelte 5, Vite, TypeScript) — owned by the frontend.
-- Backend: `src-tauri/` (Rust) — profiles, engine lifecycle, Clash API, system
-  proxy, diagnostics, tray, logging.
-- Privileged helper: `src-tauri/helper/` (`veil-helper`) — the only component
-  that ever runs as root. The GUI never runs as root.
+Veil is a Tauri 2 desktop application with a Svelte 5 frontend and a Rust
+backend. It does not implement a proxy engine of its own: every connection,
+speed, latency value and route shown in the UI comes from a real `sing-box`
+process through its Clash API. Veil manages profiles, generates the runtime
+config, supervises the engine and restores desktop state when it exits.
 
-## Status / honest scope
+The repository is currently private and pre-release. There is **no published
+binary or package** yet; build from source. Version `0.1.0` has not been tagged.
 
-Implemented and exercised in this environment:
+## Features
 
-- Real sing-box lifecycle in **system mode**: config generation, `sing-box
-  check`, spawn, Clash API `/version` health check, stats, logs, graceful
-  SIGTERM/SIGKILL, runtime adoption after a GUI restart.
-- Profile CRUD in SQLite, real validation through `sing-box check`, JSON and
-  subscription import (JSON / base64 / share-link lists), share-link parsers
-  (vless, vmess, trojan, ss, hysteria2, tuic, socks, http/https), refresh with
-  `last_error`, backup export/import.
-- Clash API: `/version`, `/traffic` (live speed NDJSON), `/connections`,
-  `/proxies`, `/proxies/{name}/delay`, `PUT /proxies/{name}`,
-  `PATCH /configs` mode, `/logs` stream, connection close.
-- System proxy apply/restore for GNOME (`gsettings`), KDE
-  (`kwriteconfig6`), XFCE (`xfconf-query`) with exact previous values saved to a
-  state file so a crashed session is restored on the next start. On
-  Hyprland/sway/unknown desktops the backend reports `unsupported` and does not
-  modify anything.
-- Desktop integration: autostart `.desktop`, notifications (notify-rust), tray
-  via `ksni` (pure Rust, StatusNotifierItem) when a watcher host exists,
-  minimize-to-tray only with a working tray.
-- Diagnostics built only from obtainable data: core, helper, polkit, TUN device,
-  nft, root, `ip -j addr`, default routes, `ip link show veil0`, profile DNS +
-  `resolvectl`/`resolv.conf`, recent errors, tray host detection.
+- **Profiles in SQLite** — create, edit, duplicate and delete profiles; raw
+  sing-box JSON is stored verbatim and never rewritten in place.
+- **Real validation** — every profile and generated runtime config is checked
+  with the actual `sing-box check` before it is used.
+- **Imports** — sing-box JSON, subscriptions (JSON, base64 JSON, or base64
+  share-link lists), share links (`vless`, `vmess`, `trojan`, `ss`,
+  `hysteria2`, `tuic`, `socks`, `http`/`https`), and QR images through
+  `zbarimg`. Clash YAML is rejected with an explicit error rather than
+  silently converted.
+- **Engine lifecycle** — `sing-box check`, spawn, Clash API `/version` health
+  check, live stats, connection list, selector switching, delay tests, Clash
+  logs, graceful `SIGTERM`/`SIGKILL`, and adoption of a still-running engine
+  after the GUI restarts.
+- **System proxy** — apply and restore on GNOME (`gsettings`), KDE
+  (`kwriteconfig`), and XFCE (`xfconf-query`). Exact previous values are saved
+  before applying and restored on disconnect, crash recovery, and app exit.
+  Desktops without a supported API report `unsupported` instead of writing
+  settings that would not apply.
+- **TUN mode through a privileged helper** — `veil-helper` is the only
+  component that runs as root, invoked through `pkexec` and polkit. The GUI
+  never runs as root. TUN startup itself is unverified end-to-end here; see
+  [Known limitations](#known-limitations).
+- **Diagnostics built from real data** — core version, helper/polkit state, TUN
+  device, nftables, routes, interfaces, DNS and recent errors.
+- **Desktop integration** — autostart entry, best-effort notifications, and a
+  StatusNotifierItem tray (`ksni`, no appindicator dependency).
+- **Typed frontend/backend contract** — every command rejects with
+  `CommandError { code, message, detail }`; `engine://state` is the canonical
+  lifecycle stream.
 
-Not verified end-to-end here (documented, not faked):
+## Screenshots
 
-- **TUN end-to-end.** `/dev/net/tun` exists, nft 1.1.7 exists, the helper builds,
-  `veil-helper check` runs, and the generated TUN config passes the real
-  `sing-box check`. Actually starting TUN requires root/polkit authentication,
-  which this build environment cannot supply non-interactively. The app reports
-  missing helper/policy/device honestly and surfaces the helper's real error.
-- GNOME/KDE/XFCE system proxy was implemented against their documented CLIs;
-  the test host is Hyprland, where Veil deliberately reports `unsupported`.
-  `gsettings` and `kwriteconfig6` are present and their command paths are
-  exercised, but Hyprland does not apply them globally, so Veil does not claim
-  system-proxy coverage there.
-- XFCE requires `xfconf-query`, which is absent on this host; Veil reports
-  `unsupported` rather than pretending.
-- Global shortcuts are not available on Wayland. Veil does not register or fake
-  them.
+Screenshots will be added with the first tagged release. The verification run
+captured screenshots of the running release app; their paths and observations
+are recorded in [docs/VERIFICATION.md](docs/VERIFICATION.md), but the image
+files are not committed to this repository.
 
-## Requirements (Arch Linux)
+## Architecture
+
+```
+Svelte 5 UI (src/)
+    |  invoke() commands + engine:// events (typed contract)
+    v
+Rust / Tauri backend (src-tauri/)
+    |-- profiles, settings, logs, diagnostics (SQLite + local files)
+    |-- engine supervisor -> `sing-box run` (system mode, as the user)
+    |   `-- Clash API client -> 127.0.0.1:<apiPort>
+    `-- pkexec -> veil-helper (root, TUN mode only)
+```
+
+The frontend talks to the backend only through the commands and events in
+[docs/CONTRACT.md](docs/CONTRACT.md). The backend never invents engine state:
+`connected` is emitted only after a real Clash API health check.
+
+Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the module map, lifecycle
+state machine, config generation rules, privilege separation, and restoration
+logic.
+
+## Supported platform
+
+| Item | Status |
+| --- | --- |
+| Linux x86_64 | Target platform |
+| Arch Linux + Hyprland 0.57 (Wayland) | Tested verification environment |
+| GNOME-family system proxy | Implemented and exercised against real `gsettings` |
+| KDE / XFCE system proxy | Implemented; **unverified** on the verification host |
+| X11 | Not part of the verified matrix; expected to work via Tauri/WebKitGTK |
+| Other Linux distributions and architectures | Best-effort; untested |
+
+sing-box **1.14.5** (official upstream build) is the validated core. Veil looks
+for it in this order: `settings.corePath`, `$VEIL_SING_BOX`, `sing-box` on
+`PATH`, beside the app executable, the Tauri resource directory,
+`/usr/lib/veil/sing-box`, then a development `vendor/sing-box-*` build.
+
+### Known limitations
+
+- **TUN end-to-end is unverified.** The helper, polkit policy and generated TUN
+  configs are validated, but starting TUN needs root/polkit authentication and
+  `/dev/net/tun`; a concurrent TUN owned the required route during the
+  verification run, so no TUN success is claimed.
+- **Hyprland/sway system proxy is unsupported.** There is no desktop-wide proxy
+  API Veil can set; the backend reports `unsupported` and the UI shows manual
+  environment-variable instructions.
+- **KDE and XFCE proxy backends are unverified** on this host (XFCE also needs
+  `xfconf-query`).
+- **No AppImage, deb or rpm is built or verified.** `docs/PACKAGING.md`
+  documents the expected AppImage command and its open questions. The Arch
+  `PKGBUILD` is syntax-checked but has not been built or installed as part of
+  the verified matrix.
+- **Global shortcuts are unavailable on Wayland** and are not registered or
+  faked.
+- **Notifications and the tray are best-effort.** The tray needs a
+  StatusNotifier host; without one the window behaves normally.
+- **Clash YAML profiles are not converted.** Veil reports the limitation
+  instead of guessing.
+- **Logs and profiles contain sensitive local data.** Logs are redacted for
+  common credential fields and the API secret, but settings, the database and
+  runtime files still contain profile material.
+
+## Install and build
+
+### Prerequisites
+
+Arch Linux:
 
 ```bash
 sudo pacman -S --needed \
-  rust nodejs pnpm \
+  base-devel rust nodejs pnpm \
   webkit2gtk-4.1 gtk3 libsoup3 \
-  nftables iproute2 polkit \
-  zbar \
-  sing-box   # optional: a bundled core is used otherwise
+  nftables iproute2 polkit dbus \
+  zbar
+# optional: an existing system core
+sudo pacman -S sing-box
 ```
 
-`libayatana-appindicator` is **not** required: Tauri's tray feature is disabled
-and the tray uses `ksni` over D-Bus StatusNotifierItem.
-
-Rust is expected via rustup (`~/.cargo/bin` on `PATH`). Node 26 + pnpm 12 were
-used here.
-
-## Build
+Ubuntu 24.04 equivalents (for CI parity):
 
 ```bash
-pnpm install            # frontend deps (lockfile committed)
-pnpm build              # builds dist/
+sudo apt install build-essential curl file pkg-config libssl-dev \
+  libdbus-1-dev \
+  libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev \
+  libjavascriptcoregtk-4.1-dev librsvg2-dev patchelf
+```
+
+Rust 1.80 or newer (rustup stable recommended), Node.js 22.13 or newer, and
+pnpm 10 or newer. The local development host used Node 26 and pnpm 12. The Tauri
+tray uses `ksni`, so `libayatana-appindicator` is not required.
+
+### Release build
+
+```bash
+git clone https://github.com/sorethe/veil.git
+cd veil
+pnpm install
+make build
+```
+
+`make build` runs `pnpm build` and then builds both release binaries:
+
+- `src-tauri/target/release/veil`
+- `src-tauri/helper/target/release/veil-helper`
+
+The app embeds `dist/` via Tauri's `custom-protocol` default feature, so the
+release binary runs without a dev server.
+
+Run the app from a graphical session:
+
+```bash
+./src-tauri/target/release/veil
+```
+
+### User-local install (no root)
+
+```bash
+make install-local
+```
+
+This installs the app, a bundled core and a desktop entry under the current
+user's home without touching the package database or existing profiles. See
+[docs/PACKAGING.md](docs/PACKAGING.md) for the exact paths and uninstall steps.
+
+### Development
+
+```bash
+pnpm install
+pnpm tauri dev          # Vite on 127.0.0.1:1420 + Tauri dev window
+```
+
+For backend-only work, `cargo build --no-default-features` in `src-tauri/`
+builds a binary that loads `devUrl` instead of embedded assets. Backend tests
+and the real-engine examples do not need a display.
+
+### Tests
+
+```bash
+make test               # app tests + helper tests
+
 cd src-tauri
-cargo build --release   # builds target/release/veil
-cargo build --release --manifest-path helper/Cargo.toml  # veil-helper
+VEIL_SINGBOX=/path/to/sing-box cargo test   # enables real-binary validations
 ```
 
-`src-tauri/Cargo.toml` enables Tauri's `custom-protocol` feature by default so a
-plain `cargo build --release` embeds `dist/` and the release binary is
-standalone. For a Tauri dev-server build that loads `devUrl` instead, disable
-default features (`cargo build --no-default-features`); normal UI work can also
-use Vite directly. A GUI session is required to show the window. The backend
-itself has no display dependency and is covered by unit tests and the
-real-engine smoke/lifecycle harnesses.
-
-## sing-box core discovery
-
-The first executable found in this order is used:
-
-1. `settings.corePath`
-2. `$VEIL_SING_BOX`
-3. `sing-box` on `PATH` (`which sing-box`)
-4. `sing-box` beside the app executable
-5. Tauri resource dir (`resources/sing-box`)
-6. `/usr/lib/veil/sing-box`
-7. development vendor build (`vendor/sing-box-*/sing-box`)
-
-A local vendored 1.14.5 copy may exist at `src-tauri/resources/sing-box` for
-development, but it is git-ignored and not part of the repository. The Arch
-PKGBUILD fetches the official v1.14.5 upstream release and installs it to
-`/usr/lib/veil/sing-box`. Change the core path in Settings to use a system
-sing-box instead.
-
-## TUN helper install
-
-```bash
-./install-helper.sh
-```
-
-This builds `veil-helper`, installs it to `/usr/bin/veil-helper`, installs
-`dev.veil.helper.policy` into `/usr/share/polkit-1/actions/`, and installs the
-desktop entry/icon. It uses interactive `sudo` only for installation. There is no
-passwordless sudoers rule; TUN start/stop goes through:
-
-```bash
-pkexec /usr/bin/veil-helper start --config PATH --core PATH --pid-file PATH --log-file PATH
-pkexec /usr/bin/veil-helper stop --pid-file PATH
-pkexec /usr/bin/veil-helper check
-```
-
-`veil-helper` runs direct argv (no shell), validates the config with
-`sing-box check` as root, detaches with `setsid`, stores the pid + config path in
-the pid file, refuses to overwrite a live unrelated process, and on stop verifies
-`/proc/<pid>/cmdline` belongs to sing-box with that config before SIGTERM, then
-SIGKILL after 8s. It leaves unrelated nftables rules untouched.
-
-## System proxy behaviour
-
-| Desktop | Mechanism | Notes |
-|---|---|---|
-| GNOME family | `gsettings org.gnome.system.proxy.*` | http/https/socks host+port, mode manual |
-| KDE Plasma | `kwriteconfig6/5` on `kioslaverc` | ProxyType/httpProxy/httpsProxy/socksProxy |
-| XFCE | `xfconf-query` | only when the tool exists |
-| Hyprland / sway / other | none | reports `unsupported`; UI shows manual env instructions |
-
-Applied **only in system mode**, after the engine passes its health check. The
-exact previous values are saved in `runtime/sysproxy.json` (0600) *before*
-modifying anything and restored on disconnect, unexpected engine exit, app exit,
-and on the next launch after a crash. TUN mode never touches the system proxy and
-reports `TUN routes all traffic`.
-
-## Data locations
-
-- Settings: `~/.config/veil/settings.json` (0600)
-- Database: `~/.local/share/veil/veil.db` (profiles, selections, meta)
-- Runtime: `~/.local/share/veil/runtime/` (config 0600, runtime state 0600,
-  proxy restore state)
-- Logs: `~/.local/share/veil/logs/veil.log` (0600, ring buffer 2000 entries in
-  memory; exports under `~/.local/share/veil/exports/`)
-- Helper files: `/run/veil/` (0755 dir, pid 0644, log 0644 so the user can tail
-  the real engine output)
-
-Raw profile content is never rewritten. The generated runtime config is a
-separate file and injects only `experimental.clash_api` and the `veil-mixed`
-(and, in TUN mode, `veil-tun`) inbounds, preserving all other fields.
-
-## Tests
-
-```bash
-cd src-tauri && cargo test          # link parsers, config gen, DB, proxy state,
-                                   # Clash mapping, logs, settings, diagnostics
-cargo test --manifest-path helper/Cargo.toml
-```
-
-Real engine smoke test (no root, no TUN, no display):
+Real-engine harnesses (no root, no TUN, no display):
 
 ```bash
 cd src-tauri
-VEIL_SINGBOX=$PWD/../vendor/sing-box-1.14.5-linux-amd64/sing-box \
-  cargo run --example engine_smoke
+VEIL_SINGBOX=/path/to/sing-box cargo run --example engine_smoke
+VEIL_SINGBOX=/path/to/sing-box \
+  XDG_DATA_HOME=/tmp/veil-lifecycle-data \
+  XDG_CONFIG_HOME=/tmp/veil-lifecycle-config \
+  cargo run --example engine_lifecycle
 ```
 
-It generates a config with a free mixed port and Clash API, validates it with the
-real binary, starts sing-box, waits for the Clash API, asserts `/version` matches,
-reads `/connections` and `/proxies`, captures real log lines, and stops the
-process with SIGTERM.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for toolchain versions, formatting and
+lint commands, test gates, and commit conventions. See
+[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for debugging, data locations and
+the module map.
 
-## Package build
+### TUN helper
 
-`packaging/PKGBUILD` builds the frontend, the Tauri app and the helper, and
-installs the helper to `/usr/bin/veil-helper`, the polkit action and the bundled
-core to `/usr/lib/veil/sing-box`.
+```bash
+make install-helper     # builds and installs veil-helper + polkit policy (sudo)
+```
 
-## Known limitations
+This installs `/usr/bin/veil-helper`, the `dev.veil.helper` polkit action, the
+desktop entry and the icon. TUN start/stop goes through
+`pkexec /usr/bin/veil-helper ...`; there is no passwordless sudoers rule. Do not
+run this on a system where the `veil` package is installed (the paths conflict).
 
-- TUN end-to-end was not run here (requires polkit/root authentication and a
-  display for the agent). The helper and generated TUN config are validated.
-- System proxy support is limited to the desktop APIs above. Hyprland has no
-  desktop-wide proxy API Veil can set; the backend says so instead of writing
-  GNOME/KDE settings that would not apply.
-- Notifications are best-effort (D-Bus); failures are ignored.
-- Tray requires a StatusNotifier host; without one, window behavior is normal.
-- `PATCH /configs` (Clash mode) is forwarded to sing-box; if sing-box rejects a
-  mode, the error is surfaced verbatim.
-- QR import needs `zbarimg`; no decoding is simulated.
+## Repository layout
+
+```
+src/                      Svelte 5 UI (views, components, stores, API client)
+src-tauri/
+  src/                    Rust backend (engine, config, DB, Clash, proxy, logs)
+  helper/                 separate veil-helper crate (root-only TUN control)
+  examples/               real sing-box smoke, lifecycle and subscription harnesses
+  resources/              polkit policy, desktop entry, local core (ignored)
+docs/                     architecture, contract, verification, packaging
+packaging/                PKGBUILD, source tarball and local install scripts
+.github/workflows/        quality and release-build CI
+Makefile                  build/test/install shortcuts
+```
+
+## Documentation
+
+- [Architecture](docs/ARCHITECTURE.md)
+- [Backend/frontend contract](docs/CONTRACT.md)
+- [Development guide](docs/DEVELOPMENT.md)
+- [Verification record](docs/VERIFICATION.md)
+- [Packaging](docs/PACKAGING.md)
+- [Releasing](docs/RELEASING.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
+- [Changelog](CHANGELOG.md)
+
+## Security
+
+Report vulnerabilities privately through GitHub Security Advisories as
+described in [SECURITY.md](SECURITY.md). Do not open a public issue for a
+security problem.
+
+## License
+
+MIT. See [LICENSE](LICENSE). Packaging fetches the official sing-box binary;
+sing-box is distributed under its own license (GPL-3.0-or-later), which the
+packaging installs alongside the core.

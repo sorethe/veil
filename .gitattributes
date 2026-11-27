@@ -1,0 +1,46 @@
+# Normalize text files to LF in the repository and in checkouts.
+* text=auto eol=lf
+
+# Source and configuration text
+*.rs text
+*.ts text
+*.js text
+*.svelte text
+*.css text
+*.html text
+*.json text
+*.toml text
+*.yml text
+*.yaml text
+*.md text
+*.sh text
+*.policy text
+*.desktop text
+Makefile text
+PKGBUILD text
+.SRCINFO text
+
+# Binary assets
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.tar.gz binary
+*.tgz binary
+*.tar.zst binary
+*.zst binary
+*.AppImage binary
+*.deb binary
+*.rpm binary
+
+# Generated dependency manifests and metadata
+pnpm-lock.yaml linguist-generated=true
+src-tauri/Cargo.lock linguist-generated=true
+src-tauri/helper/Cargo.lock linguist-generated=true
+packaging/.SRCINFO linguist-generated=true
